@@ -24,10 +24,11 @@ const K = 72, DA = ATOT / K;    // strip samples
 const KD = 13, RD = 0.17;       // ground drape (parabolic dilation) radius in samples / curvature radius
 const PM = 100, SIGMAX = ATOT + LC2 + 0.08, DS = SIGMAX / PM; // page samples
 const LP = 1.8;                 // pendulum length used for the swing tilt
-const NHS = 64;                 // samples along each handle
+const NHS = 90;                 // samples along each handle
 const A1 = HEM_A + OV;
 const LS = 2 * (A1 - XA) + Math.PI * XA; // strap length (lying U layout)
 const MAX_ST = 400;
+const CONTR = 0.6;  // how much bulging pulls the sides in (1 = inextensible)
 
 const XS = (() => { const a = [-1, -0.955, -0.91, -0.865]; for (let i = 0; i < 19; i++) a.push(-0.82 + i * (1.64 / 18)); a.push(0.865, 0.91, 0.955, 1); return Float64Array.from(a); })();
 const NC = XS.length, JC = 13;
@@ -39,6 +40,7 @@ for (let r = 0; r <= MID; r++) { SIG[MID + r] = E[r]; SIG[MID - r] = -E[r]; }
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 const sstep = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
 const smax = (a, b, k) => { const h = Math.max(k - Math.abs(a - b), 0) / k; return Math.max(a, b) + h * h * k * 0.25; };
+const pmax = (a, b) => Math.sqrt(Math.sqrt(a * a * a * a + b * b * b * b)); // soft max of non-negatives
 function bsearch(arr, v) { let lo = 0, hi = arr.length - 2; if (v <= arr[0]) return 0; if (v >= arr[hi + 1]) return hi; while (lo < hi) { const m = (lo + hi + 1) >> 1; if (arr[m] <= v) lo = m; else hi = m - 1; } return lo; }
 
 function spring(s, target, w, z, dt) { // damped spring step (semi-implicit), s={v,d}
@@ -93,7 +95,7 @@ export function createCloth(fabricId) {
     g.setAttribute('uv', new THREE.BufferAttribute(hu, 2)); g.setIndex(hidx);
     return { g, hp, hn, cx: new Float32Array(NHS * 3), rn: new Float32Array(NHS * 3), layer: h ? 1 : -1 };
   });
-  const matStrap = new THREE.MeshStandardMaterial({ map: fab.strapMap, normalMap: fab.strapNormalMap, normalScale: new THREE.Vector2(0.6, 0.6), roughness: 0.75 });
+  const matStrap = new THREE.MeshPhysicalMaterial({ map: fab.strapMap, normalMap: fab.strapNormalMap, normalScale: new THREE.Vector2(0.8, 0.8), roughness: 0.82, sheen: 0.6, sheenRoughness: 0.45, sheenColor: new THREE.Color(0x777777) });
   const handleMeshes = handles.map((hd) => { const m = new THREE.Mesh(hd.g, matStrap); m.castShadow = true; m.receiveShadow = true; m.frustumCulled = false; group.add(m); return m; });
 
   // ---------- stitches ----------
@@ -126,7 +128,8 @@ export function createCloth(fabricId) {
   const PU = new Float64Array(PM + 1), PV = new Float64Array(PM + 1), PPSI = new Float64Array(PM + 1);
   const pageF = { P0x: 0, P0y: 0, P0z: 0, Tx: 0, Ty: 0, Tz: 1, Nx: 0, Ny: 1, Nz: 0, Xx: 1, Xz: 0, Ex: 0, Ey: 0, Ez: 0 };
   // per-row temps
-  const offF = new Float64Array(NC), offB = new Float64Array(NC), xF = new Float64Array(NC), xB = new Float64Array(NC), dAF = new Float64Array(NC), aoF = new Float64Array(NC);
+  const RC = (MID + 1) * NC;
+  const offF = new Float64Array(RC), offB = new Float64Array(RC), xF = new Float64Array(RC), xB = new Float64Array(RC), dAF = new Float64Array(RC), aoF = new Float64Array(RC), vshF = new Float64Array(RC), vshB = new Float64Array(RC), rowWh = new Float64Array(MID + 1);
   let lumpList = []; let lumpMax = 0;
   let wPS = 1;           // weight of the strip model for the front layer (1 = folded)
   let fillV = 0, gapeV = 0, sewR = 0, sewL = 0, foldedness = 0;
@@ -166,7 +169,7 @@ export function createCloth(fabricId) {
     const base = g0 + EPS + HS;
     const hDrop = g.y - base;
     let rc = 0, Lv = 0;
-    if (hDrop > 0.002) { rc = clamp(hDrop * 0.38, 0.002, 0.5); Lv = Math.max(0, hDrop - rc); }
+    if (hDrop > 0.002) { rc = clamp(hDrop * 0.42, 0.002, 0.62); Lv = Math.max(0, hDrop - rc); }
     const aC = hDrop > 0.002 ? Lv + Math.PI / 2 * rc : 0;
     const hangFrac = clamp(Lv / ATOT, 0, 1);
     const sw = hangFrac * hangFrac / LP;
@@ -260,9 +263,9 @@ export function createCloth(fabricId) {
     const f = clamp(pose.fold, 0, 1), phi = Math.PI * f;
     const psi0 = Math.PI / 2 * f * f * f;
     const ell = LC2 + 1.9 * Math.pow(1 - f, 1.2);
-    const droop = -0.55 * Math.sin(2 * phi) * (1 - f * f);
+    const droop = (0.55 * Math.sin(phi) - 0.3 * Math.sin(2 * phi)) * (1 - f * f * f);
     const nc = pose.nearCurl * (1 - f) * (1 - f);
-    const curl = nc * (0.62 + 0.16 * Math.sin(time * 2.6) + 0.06 * Math.sin(time * 6.1));
+    const curl = nc * (0.95 + 0.3 * Math.sin(time * 2.6) + 0.08 * Math.sin(time * 6.1));
     sampleStrip(ATOT);
     pageF.Tx = S.tx; pageF.Ty = S.ty; pageF.Tz = S.tz; pageF.Nx = S.nx; pageF.Ny = S.ny; pageF.Nz = S.nz;
     pageF.Ex = S.px; pageF.Ey = S.py; pageF.Ez = S.pz;
@@ -272,8 +275,8 @@ export function createCloth(fabricId) {
       const t = s / ell; const G = t < 1 ? 1 - (1 - t) * (1 - t) : 1;
       let p = psi0 + (phi - psi0) * G;
       const D = clamp((s - ell) / Math.max(H - ell, 0.25), 0, 1); p += droop * Math.pow(D, 1.5);
-      p += curl * sstep(H - 1.0, H + 0.15, s);
-      if (s > H) p += dangle * lift * (1 - Math.exp(-(s - H) / 0.22));
+      p += curl * sstep(H - 0.75, H + 0.1, s);
+      if (s > H) p += dangle * lift * (1 - Math.exp(-(s - H) / 0.3));
       return p;
     };
     for (let m = 0; m <= PM; m++) {
@@ -282,7 +285,7 @@ export function createCloth(fabricId) {
       PU[m] = u; PV[m] = v; PPSI[m] = psiAt(s);
       if (s <= H && s + DS > H) { // at the tip: decide how the near handle dangles
         psiH = psiAt(H); lift = sstep(0.12, 0.7, v);
-        dangle = -Math.PI / 2 * Math.tanh(2.5 * (Math.cos(psiH) + 0.25));
+        const wd = sstep(0.15, -0.45, Math.cos(psiH)); dangle = (-Math.PI / 2 + 2 * Math.PI * wd) - psiH;
       }
     }
   }
@@ -317,9 +320,9 @@ export function createCloth(fabricId) {
     let acc = 0;
     for (let i = 0; i < lumpList.length; i++) {
       const L = lumpList[i]; const rr = L.rr; if (rr <= 1e-4) continue;
-      const fp = rr * (1.6 + 0.9 * (1 - wh));
+      const fp = rr * (1.75 + 1.35 * (1 - wh));
       const dx = x - L.x, dy = (y - L.y) * H, d2 = dx * dx + dy * dy; if (d2 >= fp * fp) continue;
-      const u2 = d2 / (fp * fp), b = rr * Math.pow(1 - u2, 1.6);
+      const u2 = d2 / (fp * fp), b = rr * (1 - u2) * (1 - u2) * (1 + 2 * u2);
       acc += b * b * b;
     }
     return Math.cbrt(acc);
@@ -333,6 +336,7 @@ export function createCloth(fabricId) {
     const needPage = wPS < 1;
     const t = time;
     for (let r = 0; r <= MID; r++) {
+      const R = r * NC;
       const sig = E[r], y = sig / H;
       const crease = sig <= LC2 + 1e-9;
       const a = crease ? ATOT : ATOT - (sig - LC2);
@@ -346,49 +350,70 @@ export function createCloth(fabricId) {
         if (!crease) {
           const Bl = lumpBulge(x, y, wh) * fy * env;
           const Bf = fillV * 0.4 * sstep(0, 0.32, y) * (1 - 0.32 * sstep(0.45, 1, y)) * env;
-          const Bp = wh * 0.022 * env * fy;
+          const Bp = wh * 0.034 * env * fy;
           B = Math.cbrt(Bl * Bl * Bl + Bf * Bf * Bf + Bp * Bp * Bp);
         }
         const yTop = Math.pow(sstep(0.42, 1, y), 1.3);
         const arch = Math.pow(Math.max(0, Math.cos(Math.PI / 2 * x / 1.08)), 0.7) * (1 + ((ax >= XSEAM ? 0 : Math.pow(1 - (ax / XSEAM) ** 2, 0.6)) - 1) * sewS);
         const lift = gapeV * 0.36 * (1 - wh) * arch * yTop;
         const mouth = wh * (0.03 + 0.27 * gapeV + 0.08 * fillV) * env * Math.pow(sstep(0.58, 1, y), 1.3);
-        const side = wh * (1 - sewS) * (0.05 + 0.75 * lumpMax + 0.22 * fillV) * sstep(0.45, 1.0, ax) * sstep(0.04, 0.55, y);
-        const fold1 = wh * fy * (0.4 + 0.6 * (1 - y)) * (0.011 * (0.5 + 0.5 * Math.sin(7.3 * x + 0.6 + 0.25 * Math.sin(0.7 * t))) + 0.006 * (0.5 + 0.5 * Math.sin(15.5 * x + 2.1 + 0.3 * Math.sin(1.13 * t))));
-        const fold2 = wh * fy * (0.4 + 0.6 * (1 - y)) * (0.011 * (0.5 + 0.5 * Math.sin(6.1 * x + 2.4 + 0.2 * Math.sin(0.8 * t))) + 0.006 * (0.5 + 0.5 * Math.sin(13.7 * x + 0.3)));
-        offF[j] = crease ? 0 : smax(B * (2 - wh), lift, 0.06) + mouth + side + fold1;
-        offB[j] = crease ? 0 : B * wh + mouth + side + fold2;
+        const side = wh * (1 - sewS) * (0.07 + 0.9 * lumpMax + 0.25 * fillV) * ax * ax * sstep(0.04, 0.5, y);
+        const fold1 = wh * fy * (0.25 + 0.75 * Math.sin(Math.PI * y)) * (0.011 * (0.5 + 0.5 * Math.sin(7.3 * x + 0.6 + 0.25 * Math.sin(0.7 * t))) + 0.006 * (0.5 + 0.5 * Math.sin(15.5 * x + 2.1 + 0.3 * Math.sin(1.13 * t))));
+        const fold2 = wh * fy * (0.25 + 0.75 * Math.sin(Math.PI * y)) * (0.011 * (0.5 + 0.5 * Math.sin(6.1 * x + 2.4 + 0.2 * Math.sin(0.8 * t))) + 0.006 * (0.5 + 0.5 * Math.sin(13.7 * x + 0.3)));
+        offF[R + j] = crease ? 0 : pmax(pmax(B * (2 - wh), lift), side) + mouth + fold1;
+        offB[R + j] = crease ? 0 : pmax(B * wh, side) + mouth + fold2;
         // hanging: top edge sags between/outside the handle attachments; full bag gets shorter & rounder
         let da = 0;
         if (wh > 0.001) {
           const sagX = ax < XA ? 0.045 * Math.pow(Math.cos(Math.PI / 2 * ax / XA), 2) : 0.11 * Math.pow((ax - XA) / (1 - XA), 1.35) * (1 + 0.6 * fillV);
-          da = wh * (sagX * Math.pow(sstep(0.7, 1, y), 1.5) - fillV * (0.2 * (1 - y) * (1 - y) + 0.13 * sstep(0.55, 1, ax) * sstep(0.32, 0, y)) - 0.06 * lumpMax * (1 - y) * (1 - y));
+          const y3 = (1 - y) * (1 - y) * (1 - y);
+          da = wh * (sagX * Math.pow(sstep(0.7, 1, y), 1.5) - fillV * (0.06 * (1 - y) * (1 - y) + 0.13 * sstep(0.55, 1, ax) * sstep(0.32, 0, y))
+            + y3 * (0.05 * (1 - x * x) * (0.5 + lumpMax + 0.6 * fillV) - 0.035 * x * x));
         }
-        dAF[j] = da;
+        dAF[R + j] = da;
         // inside ambient occlusion (darker deep inside the folded bag)
         let ao = 1 - foldedness * 0.6 * sstep(0, 0.42 + 0.35 * gapeV, 1 - y);
         ao += (1 - ao) * (1 - sewS) * sstep(0.72, 1, ax) * 0.65 * wh;
-        aoF[j] = ao;
+        aoF[R + j] = ao;
       }
       // --- width contraction (cloth does not stretch: bulging pulls the sides in)
-      xF[JC] = 0; xB[JC] = 0;
+      xF[R + JC] = 0; xB[R + JC] = 0;
       for (const dir of [1, -1]) {
         for (let j = JC + dir; j >= 0 && j < NC; j += dir) {
           const dx = Math.abs(XS[j] - XS[j - dir]);
-          const dF = offF[j] - offF[j - dir], dB = offB[j] - offB[j - dir];
-          xF[j] = xF[j - dir] + dir * Math.sqrt(Math.max(dx * dx - dF * dF, 0.3 * dx * dx));
-          xB[j] = xB[j - dir] + dir * Math.sqrt(Math.max(dx * dx - dB * dB, 0.3 * dx * dx));
+          const dF = offF[R + j] - offF[R + j - dir], dB = offB[R + j] - offB[R + j - dir];
+          xF[R + j] = xF[R + j - dir] + dir * (dx + (Math.sqrt(Math.max(dx * dx - dF * dF, 0.3 * dx * dx)) - dx) * CONTR);
+          xB[R + j] = xB[R + j - dir] + dir * (dx + (Math.sqrt(Math.max(dx * dx - dB * dB, 0.3 * dx * dx)) - dx) * CONTR);
         }
         const s = dir > 0 ? sewR : sewL;
-        if (s > 0) for (let j = JC + dir; j >= 0 && j < NC; j += dir) { const m = (xF[j] + xB[j]) * 0.5; xF[j] += (m - xF[j]) * s; xB[j] += (m - xB[j]) * s; }
+        if (s > 0) for (let j = JC + dir; j >= 0 && j < NC; j += dir) { const m = (xF[R + j] + xB[R + j]) * 0.5; xF[R + j] += (m - xF[R + j]) * s; xB[R + j] += (m - xB[R + j]) * s; }
       }
-      // --- positions
+      rowWh[r] = wh;
+    }
+    // --- vertical length conservation: bulging pulls the free edge in (lying: the hem toward the fold; hanging: the fold up)
+    for (let j = 0; j < NC; j++) {
+      let cF = 0, cB = 0; vshF[j] = 0; vshB[j] = 0;
+      for (let r = 1; r <= MID; r++) {
+        const ds = E[r] - E[r - 1], dF = offF[r * NC + j] - offF[(r - 1) * NC + j], dB = offB[r * NC + j] - offB[(r - 1) * NC + j];
+        cF += (ds - Math.sqrt(Math.max(ds * ds - dF * dF, 0.3 * ds * ds))) * CONTR; cB += (ds - Math.sqrt(Math.max(ds * ds - dB * dB, 0.3 * ds * ds))) * CONTR;
+        vshF[r * NC + j] = cF; vshB[r * NC + j] = cB;
+      }
+      for (let r = 0; r <= MID; r++) { // hanging: anchor at the top instead -> lower rows rise
+        const w = rowWh[r], o = r * NC + j;
+        vshF[o] = vshF[o] * (1 - w) - (cF - vshF[o]) * w; vshB[o] = vshB[o] * (1 - w) - (cB - vshB[o]) * w;
+      }
+    }
+    for (let r = 0; r <= MID; r++) {
+      const R = r * NC;
+      const sig = E[r];
+      const crease = sig <= LC2 + 1e-9;
+      const a = crease ? ATOT : ATOT - (sig - LC2);
       const iF = MID + r, iB = MID - r;
       for (let j = 0; j < NC; j++) {
         const x = XS[j];
         if (crease) {
           const al = sig / HS;
-          stripPos(ATOT + dAF[j], x, 0, _a);
+          stripPos(ATOT + dAF[R + j] + (vshF[R + j] + vshB[R + j]) * 0.5, x, 0, _a);
           // front (+) and back (-) halves of the rounded crease
           for (const sg of (r === 0 ? [1] : [1, -1])) {
             const ca = Math.cos(al), sa = Math.sin(al) * sg;
@@ -398,23 +423,23 @@ export function createCloth(fabricId) {
               pagePos(sig, x, 0, 2 * HS, 0, _b);
               pos[o] = _b.x + (pos[o] - _b.x) * wPS; pos[o + 1] = _b.y + (pos[o + 1] - _b.y) * wPS; pos[o + 2] = _b.z + (pos[o + 2] - _b.z) * wPS;
             }
-            col[o] = col[o + 1] = col[o + 2] = aoF[j];
+            col[o] = col[o + 1] = col[o + 2] = aoF[R + j];
           }
           continue;
         }
         // back layer
-        stripPos(a + dAF[j], xB[j], -(HS + offB[j]), _a);
-        let o = (iB * NC + j) * 3; pos[o] = _a.x; pos[o + 1] = _a.y; pos[o + 2] = _a.z; col[o] = col[o + 1] = col[o + 2] = aoF[j];
+        stripPos(a + dAF[R + j] + vshB[R + j], xB[R + j], -(HS + offB[R + j]), _a);
+        let o = (iB * NC + j) * 3; pos[o] = _a.x; pos[o + 1] = _a.y; pos[o + 2] = _a.z; col[o] = col[o + 1] = col[o + 2] = aoF[R + j];
         // front layer
         o = (iF * NC + j) * 3;
-        if (wPS > 0) stripPos(a + dAF[j], xF[j], HS + offF[j], _a);
+        if (wPS > 0) stripPos(a + dAF[R + j] + vshF[R + j], xF[R + j], HS + offF[R + j], _a);
         if (needPage) {
-          const wig = pose.nearCurl * (1 - f) * 0.045 * Math.sin(3.1 * x + 4.3 * t) * sstep(H - 0.7, H, sig);
+          const wig = pose.nearCurl * (1 - f) * 0.07 * Math.sin(3.1 * x + 4.3 * t) * sstep(H - 0.7, H, sig);
           pagePos(sig, x, -wig, 2 * HS, 0, _b);
           if (wPS > 0) _b.lerp(_a, wPS);
           _a.copy(_b);
         }
-        pos[o] = _a.x; pos[o + 1] = _a.y; pos[o + 2] = _a.z; col[o] = col[o + 1] = col[o + 2] = aoF[j] + (1 - aoF[j]) * (1 - wPS);
+        pos[o] = _a.x; pos[o + 1] = _a.y; pos[o + 2] = _a.z; col[o] = col[o + 1] = col[o + 2] = aoF[R + j] + (1 - aoF[R + j]) * (1 - wPS);
       }
     }
     // normals: n = dU x dV (points to the printed outside)
@@ -455,8 +480,8 @@ export function createCloth(fabricId) {
     else { aU = XA + (s - leg - Math.PI * XA); xU = XA; }
     // taut: two legs converging on the grip
     const half = LS / 2; let aT, xT;
-    if (s <= half) { aT = A1 * (1 - s / half); xT = -XA * Math.pow(Math.min(aT / HEM_A, 1), 0.55); }
-    else { aT = A1 * ((s - half) / half); xT = XA * Math.pow(Math.min(aT / HEM_A, 1), 0.55); }
+    if (s <= half) { aT = A1 * Math.pow(1 - s / half, 1.7); xT = -XA * Math.pow(Math.min(aT / HEM_A, 1), 0.55); }
+    else { aT = A1 * Math.pow((s - half) / half, 1.7); xT = XA * Math.pow(Math.min(aT / HEM_A, 1), 0.55); }
     out.a = aU + (aT - aU) * tau; out.x = xU + (xT - xU) * tau;
     return out;
   }
@@ -497,7 +522,7 @@ export function createCloth(fabricId) {
           const target = offLie + (offHang - offLie) * tauL;
           const off = offHem + (target - offHem) * ramp;
           const cw = sstep(HEM_A - 0.35, HEM_A, a) + (a / HEM_A - sstep(HEM_A - 0.35, HEM_A, a)) * tauL;
-          const liftH = hw * (0.07 + 0.035 * Math.sin(5.3 * t + ph)) * Math.pow(free, 1.5);
+          const liftH = hw * (0.17 + 0.07 * Math.sin(5.3 * t + ph)) * Math.pow(free, 1.3);
           if (page) {
             pagePos(ATOT + LC2 - a, x, -(TH / 2 + 0.003), 1.5 * TH + 0.003, TH / 2, _h0);
             const pn = Q; let rx = pn.nx, ry = pn.ny, rz = pn.nz;
@@ -540,7 +565,6 @@ export function createCloth(fabricId) {
 
   // ---------- stitches ----------
   const _sp = new THREE.Vector3(), _sn = new THREE.Vector3(), _prev = new THREE.Vector3(), _dir = new THREE.Vector3(), _zA = new THREE.Vector3(), _mat = new THREE.Matrix4(), _col = new THREE.Color();
-  const lastStitch = { R: null, L: null };
   function seamXY(side, tt, off) { return { x: (side === 'R' ? 1 : -1) * (XSEAM - clamp(off, -0.12, 0.12)), y: 1 - clamp(tt, 0, 1) }; }
   function buildStitches() {
     const prevBySide = { R: null, L: null };
@@ -637,7 +661,6 @@ export function createCloth(fabricId) {
       stitches.push(st);
       stitchMesh.setColorAt(stitches.length - 1, _col.setHex(st.color));
       stitchMesh.instanceColor.needsUpdate = true;
-      lastStitch[st.side] = st;
     },
     clearStitches() { stitches.length = 0; stitchMesh.count = 0; },
     setStitches(arr) { cloth.clearStitches(); for (const s of arr || []) cloth.addStitch(s.side, s.t, s.off, s.color); },

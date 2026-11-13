@@ -10,7 +10,7 @@ console.log('fabric gen', times.join(' '));
 
 let cloth = createCloth('flower');
 scene.add(cloth.group);
-const apple = new THREE.Mesh(new THREE.SphereGeometry(0.34, 32, 20), new THREE.MeshStandardMaterial({ color: 0xc8242c, roughness: 0.35 }));
+const apple = new THREE.Mesh(new THREE.SphereGeometry(0.29, 32, 20), new THREE.MeshStandardMaterial({ color: 0xc8242c, roughness: 0.35 }));
 apple.castShadow = true; apple.visible = false; scene.add(apple);
 const plateau = new THREE.Mesh(new THREE.BoxGeometry(6, 0.7, 3), new THREE.MeshStandardMaterial({ color: 0x8b8f96, roughness: 0.5 }));
 plateau.position.set(0, 0.35, -0.8); plateau.receiveShadow = true; plateau.castShadow = true; plateau.visible = false; scene.add(plateau);

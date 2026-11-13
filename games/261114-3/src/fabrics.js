@@ -216,8 +216,9 @@ export function getStrapTextures(color) {
   const w = 64, h = 1024, c = canvas(w, h), ctx = c.getContext('2d'), r = rng(color);
   const col = new THREE.Color(color), hex = '#' + col.getHexString();
   ctx.fillStyle = hex; ctx.fillRect(0, 0, w, h);
-  for (let x = 0; x < w; x += 2) { ctx.fillStyle = (x / 2) % 2 ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.10)'; ctx.fillRect(x, 0, 1, h); }
-  for (let y = 0; y < h; y += 2) { ctx.fillStyle = `rgba(0,0,0,${0.03 + r() * 0.04})`; ctx.fillRect(0, y, w, 1); }
+  for (let x = 0; x < w; x += 2) { ctx.fillStyle = (x / 2) % 2 ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.16)'; ctx.fillRect(x, 0, 1, h); }
+  for (let y = 0; y < h; y += 1) { ctx.fillStyle = y % 2 ? `rgba(0,0,0,${0.05 + r() * 0.05})` : `rgba(255,255,255,${0.02 + r() * 0.04})`; ctx.fillRect(0, y, w, 1); }
+  for (let y = 0; y < h; y += 4) for (let x = (y / 4) % 4; x < w; x += 4) { ctx.fillStyle = 'rgba(0,0,0,0.07)'; ctx.fillRect(x, y, 1, 2); } // twill
   // folded edges of the webbing: darker rim + highlight line
   ctx.fillStyle = 'rgba(0,0,0,0.22)'; ctx.fillRect(0, 0, 3, h); ctx.fillRect(w - 3, 0, 3, h);
   ctx.fillStyle = 'rgba(255,255,255,0.12)'; ctx.fillRect(4, 0, 1, h); ctx.fillRect(w - 5, 0, 1, h);
@@ -261,9 +262,9 @@ export function getFabric(id) {
   fabricGrain(p, MW, MH, r, 1);
   // 2) inside: greige reverse with faint show-through and the turned hem (which shows the print)
   const bc = canvas(MW, MH), b = bc.getContext('2d');
-  b.fillStyle = mixHex(def.base, '#f3eee4', 0.78); b.fillRect(0, 0, MW, MH);
+  b.fillStyle = mixHex(def.base, '#e9e1d2', 0.7); b.fillRect(0, 0, MW, MH);
   const small = canvas(MW / 4, MH / 4); small.getContext('2d').drawImage(pc, 0, 0, MW / 4, MH / 4);
-  b.save(); b.globalAlpha = 0.2; b.imageSmoothingEnabled = true; b.drawImage(small, 0, 0, MW, MH); b.restore();
+  b.save(); b.globalAlpha = 0.3; b.imageSmoothingEnabled = true; b.drawImage(small, 0, 0, MW, MH); b.restore();
   fabricGrain(b, MW, MH, r, 1.25);
   const hemPx = Math.round(0.12 * S);
   // turned hem band: print side folded over, with its raw edge folded under (a slight ridge)
