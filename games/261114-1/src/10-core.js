@@ -1023,12 +1023,12 @@
       // 指の腹側へゆるく曲げる
       if (y > 0.3) z -= 0.11 * Math.pow(y - 0.3, 2);
       pos.setXYZ(i, x, y, z);
-      var alpha = 1 - U.smooth(0.5, 0.92, y);
+      var alpha = 1 - U.smooth(0.62, 0.95, y);
       col[i * 4] = 1; col[i * 4 + 1] = 1; col[i * 4 + 2] = 1; col[i * 4 + 3] = alpha;
     }
     geo.setAttribute('color', new THREE.BufferAttribute(col, 4));
     geo.computeVertexNormals();
-    var skin = new THREE.MeshStandardMaterial({ color: 0xf1c3a5, roughness: 0.55, metalness: 0, transparent: true, opacity: 0.55, depthWrite: false, vertexColors: true, emissive: 0x4a2a1c, emissiveIntensity: 0.35 });
+    var skin = new THREE.MeshStandardMaterial({ color: 0xe9b392, roughness: 0.6, metalness: 0, transparent: true, opacity: 0.78, depthWrite: false, vertexColors: true, emissive: 0x4a2a1c, emissiveIntensity: 0.3 });
     var m = new THREE.Mesh(geo, skin); m.renderOrder = 20;
     grp.add(m);
     // 爪
@@ -1124,7 +1124,9 @@
     fM.makeBasis(fX, fAxis, fNail);
     hFinger.quaternion.setFromRotationMatrix(fM);
     hFinger.position.copy(tip).addScaledVector(fAxis, hover);
-    var S = HI.fingerScale, s = 1 - (press || 0) * 0.04;
+    // 画面上でいつも同じくらいの太さ（約 34px）に見えるよう、その場所の縮尺に合わせる
+    var ppu = 0; try { ppu = IN.pxPerUnit(tip) || 0; } catch (_) { ppu = 0; }
+    var S = ppu > 1 ? U.clamp(34 / (ppu * 0.17), HI.fingerScale, 3.2) : HI.fingerScale, s = 1 - (press || 0) * 0.04;
     hFinger.scale.set(S * (1 + (press || 0) * 0.03), S * s, S * (1 + (press || 0) * 0.03));
   }
 
@@ -1226,8 +1228,8 @@
     if (hcfg && HI.stage >= 2 && hcfg.demo && !IN.active) fa = updateDemo(dt);
     hFingerA = U.damp(hFingerA, fa, 14, dt);
     hFinger.visible = hFingerA > 0.01;
-    hFingerMats[0].opacity = 0.55 * hFingerA;
-    hFingerMats[1].opacity = 0.6 * hFingerA;
+    hFingerMats[0].opacity = 0.78 * hFingerA;
+    hFingerMats[1].opacity = 0.82 * hFingerA;
   });
 
   /* ======================================================================
@@ -1278,7 +1280,7 @@
   function getSteam() {
     var p = steamPool.pop();
     if (!p) {
-      var mat = new THREE.SpriteMaterial({ map: puffTex[steamLive.length % 3], color: 0xffffff, transparent: true, opacity: 0, depthWrite: false });
+      var mat = new THREE.SpriteMaterial({ map: puffTex[steamLive.length % 3], color: 0xe6eaee, transparent: true, opacity: 0, depthWrite: false });
       var sp = new THREE.Sprite(mat); sp.renderOrder = 30; sp.raycast = function () {};
       p = { o: sp, vel: new THREE.Vector3() };
     }

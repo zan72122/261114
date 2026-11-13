@@ -893,7 +893,7 @@
       [0.36, 0.106], [0.35, 0.104], [0.3, 0.07], [0.22, 0.04], [0.1, 0.032], [0, 0.032]];
     var t = lineTex('soyDishLines', pts.length, [[7, 8]], '#f4f2ed', '#2c4d86');
     g.add(mesh(lathe(pts, 48), phys({ color: 0xffffff, map: t, roughness: 0.3, clearcoat: 1, clearcoatRoughness: 0.05 }, 1)));
-    var sm2 = phys({ color: 0x1e0903, roughness: 0.05, metalness: 0, clearcoat: 1, clearcoatRoughness: 0.03 }, 1.1);
+    var sm2 = phys({ color: 0x1a0702, roughness: 0.2, metalness: 0, clearcoat: 0.35, clearcoatRoughness: 0.1 }, 0.3);
     var ly = 0.06;
     var s = liquid(0.272, ly, sm2, 0.0005);
     g.add(s);

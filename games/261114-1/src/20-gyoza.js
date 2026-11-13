@@ -153,9 +153,9 @@
       var img = ctx.getImageData(0, 0, S, S), d = img.data;
       for (var i = 0; i < d.length; i += 4) {
         var r = d[i], g = d[i + 1], b = d[i + 2];
-        if (g > r * 0.9) { d[i] = r * 0.7 + 40; d[i + 1] = g * 0.7 + 40; d[i + 2] = b * 0.5 + 25; continue; } // 緑はくすむ
+        if (g > r * 0.9) { d[i] = r * 0.5 + 14; d[i + 1] = g * 0.72 + 22; d[i + 2] = b * 0.35 + 6; continue; } // ニラの緑ははっきり残す
         var l = (r * 0.5 + g * 0.35 + b * 0.15);
-        d[i] = l * 0.95 + 42; d[i + 1] = l * 0.85 + 34; d[i + 2] = l * 0.68 + 26;
+        d[i] = l * 0.78 + 24; d[i + 1] = l * 0.60 + 14; d[i + 2] = l * 0.44 + 8; // 火の通った肉の茶色（皮の白とはっきり違う）
       }
       ctx.putImageData(img, 0, 0);
       TEX.cookedMat = new THREE.MeshPhysicalMaterial({
@@ -248,9 +248,9 @@
     'vec3 fillC = texture2D(uFillTex, fuv * 1.6 + uSeed, 2.5).rgb;',
     'col = mix(col, col * mix(vec3(1.0), fillC * 2.2, 0.5), body * 0.10 * isOut * (1.0 - flour));',
     // 蒸し上がり: しっとり半透明。あんの上は色が透け、とじ目・ひだ（2枚重ね）は白っぽく不透明
-    'vec3 ck = sl(vec3(0.82, 0.78, 0.67)) * (0.95 + 0.10 * nz.g);',
+    'vec3 ck = sl(vec3(0.80, 0.745, 0.60)) * (0.95 + 0.10 * nz.g);',
     'vec3 thru = mix(ck * 0.74, fillC * 0.85, 0.62);',
-    'float tr = body * (0.45 + 0.35 * nz.r) * (0.4 + 0.6 * isOut);',
+    'float tr = body * (0.58 + 0.35 * nz.r) * (0.4 + 0.6 * isOut);',
     'ck = mix(ck, thru, tr);',
     'ck = mix(ck, sl(vec3(0.95, 0.93, 0.87)), (1.0 - smoothstep(0.06, 0.24, lam)) * 0.7);',
     'col = mix(col, ck, uCook);',
@@ -992,19 +992,20 @@
     var hA = holeField(CA, 0.36, 0.72, 13), hB = holeField(CB, 0.40, 0.72, 14), hF = holeField(CF, 0.45, 0.75, 15), hBub = holeField(0.02, 0.15, 0.4, 16);
     // 1) ぎょうざの足あと・距離・一般の到達時刻・基本のレース
     var gy = L.map(function (g) { return { x: g.x, z: g.z, c: Math.cos(g.rot), s: Math.sin(g.rot) }; });
+    var pleatSparse = L.map(function (g) { var c = 0; for (var q = 0; q < 7; q++) c += (g.pleats[q] || 0) > 0 ? 1 : 0; return 1 - c / 7; });
     for (y = 0; y < S; y++) {
       var wz = -Rw + (y + 0.5) * px;
       for (x = 0; x < S; x++) {
         var wx = -Rw + (x + 0.5) * px;
         idx = y * S + x;
         var rr = Math.sqrt(wx * wx + wz * wz) / Rw;
-        var dmin = 9, inside = false;
+        var dmin = 9, inside = false, jmin = 0;
         for (j = 0; j < n; j++) {
           var dx = wx - gy[j].x, dz = wz - gy[j].z;
           var lx = dx * gy[j].c - dz * gy[j].s, lz = dx * gy[j].s + dz * gy[j].c;
           var ex = lx / 0.39, ez = lz / 0.155, e = Math.sqrt(ex * ex + ez * ez);
           if (e < 0.9) inside = true;
-          var dd = (e - 1) * 0.155; if (dd < dmin) dmin = dd;
+          var dd = (e - 1) * 0.155; if (dd < dmin) { dmin = dd; jmin = j; }
         }
         var nl = fLow(wx, wz), nm = fMid(wx, wz), nh = fHi(wx, wz);
         var tg = 0.60 + 0.34 * smooth01(Math.max(0, dmin) / 0.75) + (nl - 0.5) * 0.16 + (nm - 0.5) * 0.05;
@@ -1014,6 +1015,8 @@
         var mA = hA(wx / CA + 50, wz / CA + 50), mB = hB(wx / CB + 50, wz / CB + 50);
         var th = Math.min(mA, mB * 1.12) * 0.62 + (nm - 0.5) * 0.30 + (nh - 0.5) * 0.12;
         var near = smooth01(1 - Math.max(0, dmin) / 0.07);
+        // ひだの少ないぎょうざの周りは、地のレースがまばら（穴が大きい）。羽のふさだけがはっきり残る
+        th -= pleatSparse[jmin] * 0.5 * (1 - near) * (1 - smooth01((rr - 0.9) / 0.07));
         th += 0.7 * near + 0.5 * smooth01((rr - 0.9) / 0.07);
         TH[idx] = th;
         BR[idx] = smooth01((rr - 0.82) / 0.15) * 0.8 + (nl - 0.5) * 0.7 + (nm - 0.5) * 0.3 + near * 0.25;

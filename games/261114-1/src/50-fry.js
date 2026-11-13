@@ -789,8 +789,10 @@
         hit = true;
         sfx('sizzleBurst', { vol: 1 });
         var c = V3(sp.x, surfY + 0.1, sp.z);
-        G.fx.steam(c, { count: 18, spread: 0.8, rise: 2.6, size: 1.25, life: 2.6, opacity: 0.5 });
-        G.fx.steam(panCenter(0.5), { count: 14, spread: 1.5, rise: 2.0, size: 1.0, life: 2.4, opacity: 0.45 });
+        G.fx.steam(c, { count: 20, spread: 0.8, rise: 3.6, size: 1.35, life: 3.0, opacity: 0.62 });
+        G.fx.steam(panCenter(0.5), { count: 18, spread: 1.6, rise: 2.4, size: 1.3, life: 2.6, opacity: 0.6 });
+        // じゅわっ の第二波: 少し遅れて、鍋の上へ高く立ちのぼる（白い壁やこんろの上でも見える大きさ）
+        sc.wait(0.35).then(function () { G.fx.steam(panCenter(0.9), { count: 16, spread: 1.2, rise: 4.2, size: 1.7, life: 3.2, opacity: 0.6 }); });
         G.fx.burst(c, 'drop', { count: 10, size: 1.4, speed: 1.4, floor: surfY });
         G.cam.shake(0.015, 0.4);
         loop('sizzle', 1);
