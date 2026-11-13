@@ -311,6 +311,9 @@ export function createWorld(scene, renderer) {
   const room = new THREE.Group(); room.name = 'room';
   const park = new THREE.Group(); park.name = 'park';
   scene.add(room, park);
+  // 部屋のミシンにはスポットライトが1つある。公園にも明るさ0の同じ種類の光を置き、
+  // 光の構成を揃える（場面の切り替えでシェーダーが作り直されて止まるのを防ぎ、事前コンパイルを効かせる）。
+  { const ph = new THREE.SpotLight(0xffffff, 0, 1); ph.castShadow = false; ph.position.set(0, -50, 0); ph.target.position.set(0, -60, 0); park.add(ph, ph.target); }
 
   // ---- 光（共有） ----
   const sun = new THREE.DirectionalLight(0xffffff, 2.5);

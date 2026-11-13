@@ -5,6 +5,8 @@ import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment
 
 const STORE_KEY = 'gf-261114-3';
 const SCALE_STEPS = [1, 0.85, 0.7, 0.6];
+// 描画ピクセル数の上限（CSS px × 解像度²）。iPad など大画面で解像度だけが無駄に増えないようにする。
+const PIXEL_BUDGET = 3.0e6;
 
 const clamp01 = (k) => (k < 0 ? 0 : k > 1 ? 1 : k);
 export const ease = {
@@ -69,6 +71,9 @@ export function createEngine() {
   renderer.toneMappingExposure = 1.0;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  // 影マップは「影を落とす物か光が動いたときだけ」描き直す（下の shadowDirty）。
+  renderer.shadowMap.autoUpdate = false;
+  renderer.shadowMap.needsUpdate = true;
 
   const scene = new THREE.Scene();
   try {
@@ -138,7 +143,8 @@ export function createEngine() {
   }
   function applySize(force) {
     const [w, h] = viewportSize();
-    const pr = Math.min(window.devicePixelRatio || 1, 2) * engine.quality.scale;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const pr = Math.max(1, Math.min(dpr, Math.sqrt(PIXEL_BUDGET / (w * h)))) * engine.quality.scale;
     const prChanged = Math.abs(pr - curPR) > 1e-3;
     const sizeChanged = w !== curW || h !== curH;
     if (!prChanged && !sizeChanged && !force) return false;
@@ -166,7 +172,9 @@ export function createEngine() {
   try { if (window.visualViewport) window.visualViewport.addEventListener('resize', onResizeEvent); } catch (_) { /* */ }
 
   // dynamic quality
-  let ema = 25, slowAcc = 0, fastAcc = 0, grace = 1.5, downgrades = 0, skipFrames = 10;
+  // 目標は 60fps。下げても速くならない（省電力モードの 30fps 固定など）ときは元に戻して打ち止め。
+  let ema = 17, slowAcc = 0, fastAcc = 0, grace = 1.5, downgrades = 0, skipFrames = 10;
+  let qProbe = null, capMs = 0; // qProbe: {ema, step} 下げる直前の状態
   function setStep(s) {
     qStep = Math.max(0, Math.min(SCALE_STEPS.length - 1, s));
     engine.quality.scale = SCALE_STEPS[qStep];
@@ -176,20 +184,30 @@ export function createEngine() {
     if (skipFrames > 0) { skipFrames--; return; }
     if (!(rawMs > 0) || rawMs > 1500) return;
     rawMs = Math.min(rawMs, 250);
-    ema = ema * 0.9 + rawMs * 0.1;
+    ema = ema * 0.92 + rawMs * 0.08;
     const sec = rawMs / 1000;
     if (grace > 0) { grace -= sec; slowAcc = fastAcc = 0; return; }
-    if (ema > 38) { slowAcc += sec; fastAcc = 0; } else if (ema < 22) { fastAcc += sec; slowAcc = 0; } else { slowAcc = fastAcc = 0; }
+    if (qProbe) { // 直前の引き下げが効いたか
+      const helped = ema < qProbe.ema * 0.88;
+      if (!helped) { capMs = qProbe.ema * 1.15; if (qProbe.step !== qStep) setStep(qProbe.step); else if (qProbe.low) setLow(false); grace = 1.0; }
+      qProbe = null;
+      if (!helped) return;
+    }
+    const slowLim = Math.max(23, capMs), fastLim = capMs ? 0 : 17.8;
+    if (ema > slowLim) { slowAcc += sec; fastAcc = 0; } else if (ema < fastLim) { fastAcc += sec; slowAcc = 0; } else { slowAcc = fastAcc = 0; }
     if (slowAcc > 1.5) {
-      slowAcc = 0; grace = 1.0;
-      if (qStep < SCALE_STEPS.length - 1) { downgrades++; setStep(qStep + 1); }
-      else if (!engine.quality.low) {
-        engine.quality.low = true; engine.quality.maxParticles = 20;
-        L.quality.emit(engine.quality);
-      }
+      slowAcc = 0; grace = 1.2;
+      if (qStep < SCALE_STEPS.length - 1) { qProbe = { ema, step: qStep }; downgrades++; setStep(qStep + 1); }
+      else if (!engine.quality.low) { qProbe = { ema, step: qStep, low: true }; setLow(true); }
     } else if (fastAcc > 6 * (1 + downgrades) && qStep > 0) {
       fastAcc = 0; grace = 1.0; setStep(qStep - 1);
     }
+  }
+  function setLow(v) {
+    if (engine.quality.low === v) return;
+    engine.quality.low = v; engine.quality.maxParticles = v ? 20 : 60;
+    L.quality.emit(engine.quality);
+    engine.shadowDirty();
   }
 
   // ------------------------------------------------------------ camera framing
@@ -462,6 +480,54 @@ export function createEngine() {
     flush: writeNow,
   };
 
+  // ------------------------------------------------------------ shadow map on demand
+  // 影を落とす物（castShadow）の行列・形状の版数・表示状態と、影を出す光の行列を毎フレーム並べて前回と比べる。
+  // 変わったときだけ影マップを描き直す（止まっている場面では影の描画パスを丸ごと省く）。
+  let sig = new Float64Array(2048), sigN = 0, sigPrev = new Float64Array(2048), sigPrevN = -1, forceShadow = 2;
+  engine.shadowDirty = () => { forceShadow = 2; };
+  function push(v) {
+    if (sigN >= sig.length) { const a = new Float64Array(sig.length * 2); a.set(sig); sig = a; }
+    sig[sigN++] = v;
+  }
+  function pushMat(m) { const e = m.elements; for (let i = 0; i < 16; i++) push(e[i]); }
+  function geoVer(g) {
+    if (!g) return 0;
+    const p = g.attributes && g.attributes.position;
+    return g.id * 1e6 + (p ? p.version : 0) * 7 + (g.index ? g.index.version : 0) + g.drawRange.count * 1e-3;
+  }
+  function collect(o) {
+    if (!o.visible) return;
+    if (o.isLight) {
+      if (o.castShadow && o.shadow) {
+        push(-1); push(o.id); pushMat(o.matrixWorld);
+        if (o.target) pushMat(o.target.matrixWorld);
+        pushMat(o.shadow.camera.projectionMatrix); push(o.shadow.mapSize.x); push(o.shadow.map ? 1 : 0);
+      }
+    } else if (o.castShadow && (o.isMesh || o.isPoints || o.isLine)) {
+      const m = o.material;
+      push(o.id); pushMat(o.matrixWorld); push(geoVer(o.geometry));
+      push(!m ? 0 : Array.isArray(m) ? m.length : (m.visible ? m.id : -m.id));
+      if (o.isInstancedMesh) { push(o.count); push(o.instanceMatrix.version); }
+    }
+    const ch = o.children;
+    for (let i = 0; i < ch.length; i++) collect(ch[i]);
+  }
+  function updateShadowFlag() {
+    if (!renderer.shadowMap.enabled) return;
+    scene.updateMatrixWorld();
+    sigN = 0;
+    collect(scene);
+    let same = sigN === sigPrevN && forceShadow <= 0;
+    if (same) { for (let i = 0; i < sigN; i++) { if (sig[i] !== sigPrev[i]) { same = false; break; } } }
+    if (!same) {
+      renderer.shadowMap.needsUpdate = true;
+      const t = sigPrev; sigPrev = sig; sig = t; sigPrevN = sigN;
+      if (sig.length < sigPrev.length) sig = new Float64Array(sigPrev.length);
+    }
+    if (forceShadow > 0) forceShadow--;
+  }
+  canvas.addEventListener('webglcontextrestored', () => { engine.shadowDirty(); }, false);
+
   // ------------------------------------------------------------ loop / visibility
   let started = false, rafId = 0, last = null, paused = false;
   engine.onFrame = (fn) => L.frame.add(fn);
@@ -484,6 +550,7 @@ export function createEngine() {
     updateCam(dt);
     updateTasks(dt);
     L.frame.emit(dt, engine.time);
+    try { updateShadowFlag(); } catch (err) { renderer.shadowMap.needsUpdate = true; }
     try { renderer.render(scene, camera); } catch (err) { try { console.error(err); } catch (_) { /* */ } }
   }
   function pause() {

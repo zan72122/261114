@@ -51,6 +51,17 @@ function spring(s, target, w, z, dt) { // damped spring step (semi-implicit), s=
 
 let stitchGeo = null;
 
+// 前回 GPU に送った内容と比べ、変わっていれば snap を更新して true（止まっている間は転送しない）
+function changed(arr, snap, n = arr.length) {
+  let i = 0;
+  for (; i < n; i++) if (arr[i] !== snap[i]) break;
+  if (i === n) return false;
+  for (; i < n; i++) snap[i] = arr[i];
+  return true;
+}
+const SIGNS_1 = [1], SIGNS_2 = [1, -1], DIRS = [1, -1];
+const HC = [[0, 0], [0, 0], [0, 0], [0, 0]], HN = [[0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0]];
+
 export function createCloth(fabricId) {
   let fab = getFabric(fabricId);
   const group = new THREE.Group(); group.name = 'cloth';
@@ -69,6 +80,7 @@ export function createCloth(fabricId) {
   const colA = new THREE.BufferAttribute(col, 3).setUsage(THREE.DynamicDrawUsage);
   geo.setAttribute('position', posA); geo.setAttribute('normal', nrmA); geo.setAttribute('uv', new THREE.BufferAttribute(uvs, 2)); geo.setAttribute('color', colA);
   geo.setIndex(idx);
+  const snapPos = new Float32Array(pos.length).fill(NaN), snapCol = new Float32Array(col.length).fill(NaN);
 
   const matOut = new THREE.MeshPhysicalMaterial({ map: fab.map, normalMap: fab.normalMap, normalScale: new THREE.Vector2(0.55, 0.55), roughness: 0.88, sheen: 0.7, sheenRoughness: 0.5, sheenColor: new THREE.Color(fab.sheenColor).multiplyScalar(0.55), side: THREE.FrontSide, shadowSide: THREE.DoubleSide });
   const matIn = new THREE.MeshPhysicalMaterial({ map: fab.backMap, normalMap: fab.normalMap, normalScale: new THREE.Vector2(0.55, 0.55), roughness: 0.9, sheen: 0.6, sheenRoughness: 0.5, sheenColor: new THREE.Color(0xffffff).multiplyScalar(0.45), vertexColors: true, side: THREE.BackSide });
@@ -93,7 +105,7 @@ export function createCloth(fabricId) {
     g.setAttribute('position', new THREE.BufferAttribute(hp, 3).setUsage(THREE.DynamicDrawUsage));
     g.setAttribute('normal', new THREE.BufferAttribute(hn, 3).setUsage(THREE.DynamicDrawUsage));
     g.setAttribute('uv', new THREE.BufferAttribute(hu, 2)); g.setIndex(hidx);
-    return { g, hp, hn, cx: new Float32Array(NHS * 3), rn: new Float32Array(NHS * 3), layer: h ? 1 : -1 };
+    return { g, hp, hn, snap: new Float32Array(nv * 3).fill(NaN), cx: new Float32Array(NHS * 3), rn: new Float32Array(NHS * 3), layer: h ? 1 : -1 };
   });
   const matStrap = new THREE.MeshPhysicalMaterial({ map: fab.strapMap, normalMap: fab.strapNormalMap, normalScale: new THREE.Vector2(0.8, 0.8), roughness: 0.82, sheen: 0.6, sheenRoughness: 0.45, sheenColor: new THREE.Color(0x777777) });
   const handleMeshes = handles.map((hd) => { const m = new THREE.Mesh(hd.g, matStrap); m.castShadow = true; m.receiveShadow = true; m.frustumCulled = false; group.add(m); return m; });
@@ -105,6 +117,7 @@ export function createCloth(fabricId) {
   stitchMesh.count = 0; stitchMesh.frustumCulled = false; stitchMesh.castShadow = false;
   stitchMesh.setColorAt(0, new THREE.Color(1, 1, 1));
   stitchMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  const snapSt = new Float32Array(MAX_ST * 16).fill(NaN);
   group.add(stitchMesh);
 
   // ---------- state ----------
@@ -378,7 +391,7 @@ export function createCloth(fabricId) {
       }
       // --- width contraction (cloth does not stretch: bulging pulls the sides in)
       xF[R + JC] = 0; xB[R + JC] = 0;
-      for (const dir of [1, -1]) {
+      for (const dir of DIRS) {
         for (let j = JC + dir; j >= 0 && j < NC; j += dir) {
           const dx = Math.abs(XS[j] - XS[j - dir]);
           const dF = offF[R + j] - offF[R + j - dir], dB = offB[R + j] - offB[R + j - dir];
@@ -415,7 +428,7 @@ export function createCloth(fabricId) {
           const al = sig / HS;
           stripPos(ATOT + dAF[R + j] + (vshF[R + j] + vshB[R + j]) * 0.5, x, 0, _a);
           // front (+) and back (-) halves of the rounded crease
-          for (const sg of (r === 0 ? [1] : [1, -1])) {
+          for (const sg of (r === 0 ? SIGNS_1 : SIGNS_2)) {
             const ca = Math.cos(al), sa = Math.sin(al) * sg;
             const i = sg > 0 ? iF : iB, o = (i * NC + j) * 3;
             pos[o] = _a.x + S.tx * HS * ca + S.nx * HS * sa; pos[o + 1] = _a.y + S.ty * HS * ca + S.ny * HS * sa; pos[o + 2] = _a.z + S.tz * HS * ca + S.nz * HS * sa;
@@ -454,8 +467,8 @@ export function createCloth(fabricId) {
         const o = (i * NC + j) * 3; nrm[o] = nx / l; nrm[o + 1] = ny / l; nrm[o + 2] = nz / l;
       }
     }
-    posA.needsUpdate = true; nrmA.needsUpdate = true; colA.needsUpdate = true;
-    geo.computeBoundingSphere();
+    if (changed(pos, snapPos)) { posA.needsUpdate = true; nrmA.needsUpdate = true; geo.computeBoundingSphere(); }
+    if (changed(col, snapCol)) colA.needsUpdate = true;
   }
 
   // grid lookup on a layer at bag coords (x in [-1,1], y in [0,1]); layer +1 front, -1 back
@@ -547,8 +560,10 @@ export function createCloth(fabricId) {
         // thickness dir k = w x t
         const kx = wy * tz - wz * ty, ky = wz * tx - wx * tz, kz = wx * ty - wy * tx;
         const hw2 = SW / 2, ht = TH / 2;
-        const C = [[hw2, ht], [-hw2, ht], [-hw2, -ht], [hw2, -ht]];
-        const Nf = [[kx, ky, kz], [-wx, -wy, -wz], [-kx, -ky, -kz], [wx, wy, wz]];
+        const C = HC, Nf = HN;
+        C[0][0] = hw2; C[0][1] = ht; C[1][0] = -hw2; C[1][1] = ht; C[2][0] = -hw2; C[2][1] = -ht; C[3][0] = hw2; C[3][1] = -ht;
+        Nf[0][0] = kx; Nf[0][1] = ky; Nf[0][2] = kz; Nf[1][0] = -wx; Nf[1][1] = -wy; Nf[1][2] = -wz;
+        Nf[2][0] = -kx; Nf[2][1] = -ky; Nf[2][2] = -kz; Nf[3][0] = wx; Nf[3][1] = wy; Nf[3][2] = wz;
         for (let fI = 0; fI < 4; fI++) {
           const c0 = C[fI], c1 = C[(fI + 1) % 4], n = Nf[fI];
           for (let q = 0; q < 2; q++) {
@@ -558,8 +573,7 @@ export function createCloth(fabricId) {
           }
         }
       }
-      hd.g.attributes.position.needsUpdate = true; hd.g.attributes.normal.needsUpdate = true;
-      hd.g.computeBoundingSphere();
+      if (changed(hp, hd.snap)) { hd.g.attributes.position.needsUpdate = true; hd.g.attributes.normal.needsUpdate = true; hd.g.computeBoundingSphere(); }
     }
   }
 
@@ -584,8 +598,8 @@ export function createCloth(fabricId) {
       stitchMesh.setMatrixAt(i, _mat);
       prevBySide[st.side] = st; prevPos[st.side].copy(_sp);
     }
+    if (changed(stitchMesh.instanceMatrix.array, snapSt, n * 16) || stitchMesh.count !== n) stitchMesh.instanceMatrix.needsUpdate = true;
     stitchMesh.count = n;
-    stitchMesh.instanceMatrix.needsUpdate = true;
   }
 
   // ---------- attachments ----------

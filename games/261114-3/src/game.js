@@ -1394,6 +1394,9 @@ export function startGame() {
   // ====================================================================== start
   buildPegBags(false);
   applyStage(S.stage, { restore: true });
+  // 今見えていないほう（部屋 / 公園）も含め、全部のシェーダーを読み込み中に作っておく（場面切り替えのカクつき防止）。
+  // 部屋と公園は光の構成を揃えてあるので、1回で両方の場面に効く。
+  try { if (engine.renderer.compile) engine.renderer.compile(scene, camera); } catch (_) { /* */ }
   engine.start();
 
   if (__DEV__) {
