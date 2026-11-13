@@ -105,15 +105,27 @@ const Room = (() => {
       return lerp(lerp(at(xi, yi), at(xi + 1, yi), fx), lerp(at(xi, yi + 1), at(xi + 1, yi + 1), fx), fy);
     };
   }
-  function pixTex(w, h, fn, o) {
-    return Base.canvasTex(w, h, ctx => {
-      const id = ctx.createImageData(w, h), d = id.data, px = [0, 0, 0, 255];
-      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-        px[3] = 255; fn(x, y, px);
-        const i = (y * w + x) * 4; d[i] = px[0]; d[i + 1] = px[1]; d[i + 2] = px[2]; d[i + 3] = px[3];
-      }
-      ctx.putImageData(id, 0, 0);
-    }, o);
+  const pixDraw = (w, h, fn) => ctx => {
+    const id = ctx.createImageData(w, h), d = id.data, px = [0, 0, 0, 255];
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      px[3] = 255; fn(x, y, px);
+      const i = (y * w + x) * 4; d[i] = px[0]; d[i + 1] = px[1]; d[i + 2] = px[2]; d[i + 3] = px[3];
+    }
+    ctx.putImageData(id, 0, 0);
+  };
+  function pixTex(w, h, fn, o) { return Base.canvasTex(w, h, pixDraw(w, h, fn), o); }
+  // 最初の場面（くす玉）に映らない物のテクスチャは、入れ物（同じ大きさの空キャンバス）だけ先に作り、
+  // 中身は遊んでいる間に loadStep() で 1 枚ずつ描く（材質・シェーダーは最初から同じなので作り直しは起きない）
+  const lazyJobs = [];
+  function lazyTex(w, h, draw, o) {
+    const t = Base.canvasTex(w, h, () => {}, o);
+    lazyJobs.push(() => { draw(t.image.getContext('2d'), w, h); t.needsUpdate = true; });
+    return t;
+  }
+  function loadStep() {
+    const f = lazyJobs.shift();
+    if (f) { try { f(); } catch (e) { /* 描けなくても続行 */ } }
+    return lazyJobs.length;
   }
 
   // ------------------------------------------------------------ テクスチャ
@@ -160,11 +172,11 @@ const Room = (() => {
 
     // ラグの毛並み（グレー。色は材質で）
     const rr = Base.rng(21), n1 = tileNoise(rr, 16), n2 = tileNoise(rr, 64);
-    TX.rug = pixTex(512, 512, (x, y, px) => {
+    TX.rug = lazyTex(512, 512, pixDraw(512, 512, (x, y, px) => {
       const u = x / 512, v = y / 512;
       const g = 0.86 + 0.06 * (n1(u, v) - 0.5) + 0.07 * (n2(u, v) - 0.5) + 0.12 * (rr() - 0.5);
       const c = clamp(g, 0, 1) * 255; px[0] = c; px[1] = c; px[2] = c;
-    }, { repeat: [4, 4], aniso: 8 });
+    }), { repeat: [4, 4], aniso: 8 });
 
     // 壁紙（細かい凹凸）
     const wr = Base.rng(31), w1 = tileNoise(wr, 32);
@@ -211,7 +223,7 @@ const Room = (() => {
     }, { srgb: false });
 
     // 籐の編み目（すき間は透明）
-    TX.weave = Base.canvasTex(256, 256, (ctx, W, H) => {
+    TX.weave = lazyTex(256, 256, (ctx, W, H) => {
       const r = Base.rng(71);
       ctx.clearRect(0, 0, W, H);
       const rowH = 32, gap = 7, stakeW = 10, stakeSp = 64;
@@ -1059,7 +1071,7 @@ const Room = (() => {
   }
 
   return {
-    init, update, paintTrack, setFringe, setGlow, setTime, applyQuality, trash,
+    init, loadStep, update, paintTrack, setFringe, setGlow, setTime, applyQuality, trash,
     kusu: [0, 1, 2].map(i => ({
       setPull: p => kusu[i] && kusu[i].api.setPull(p),
       touch: () => kusu[i] && kusu[i].api.touch(),
