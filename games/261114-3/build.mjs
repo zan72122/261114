@@ -12,6 +12,7 @@ const isMain = !process.argv[2];
 const r = await build({
   entryPoints: [entry], bundle: true, format: 'iife', minify: isMain, write: false,
   target: ['safari15'], loader: { '.jpg': 'dataurl', '.png': 'dataurl' }, legalComments: 'none',
+  define: { __DEV__: isMain ? 'false' : 'true' },
 });
 const js = r.outputFiles[0].text.replace(/<\/script/g, '<\\/script');
 let fallback = '';
