@@ -17,7 +17,7 @@ scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
 scene.environmentIntensity = 0.55;
 const t0 = performance.now();
 const world = createWorld(scene, renderer);
-console.log('world ms', (performance.now() - t0).toFixed(0), JSON.stringify(world.timings));
+console.error('world ms', (performance.now() - t0).toFixed(0), JSON.stringify(world.timings));
 const camera = new THREE.PerspectiveCamera(36, innerWidth / innerHeight, 0.1, 300);
 const views = {
   table: [[0, 13, 14.5], [0, 0.6, -0.4]],

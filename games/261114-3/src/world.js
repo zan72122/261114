@@ -40,17 +40,25 @@ const TAU = Math.PI * 2;
 function paintWood({ W = 1024, H = 1024, tileU = 6, tileV = 5.5, planks = [1.05, 1.2, 1.1, 1.15, 1.0], seed = 1,
   base = [196, 150, 102], joints = true, pores = 7000 } = {}) {
   const r = rng(seed);
-  const cw = W >> 1; // 木目方向（u）は半分の解像度で計算して拡大
+  const cw = W >> 2; // 木目方向（u）は1/4の解像度で計算して拡大（木目はu方向にゆっくり変化）
   const col = canvas(cw, H), dat = canvas(cw, H);
   const ci = col.getContext('2d').createImageData(cw, H), di = dat.getContext('2d').createImageData(cw, H);
   const P = planks.map((w) => ({
     w, c0: (r() - 0.5) * w * 2.2, dens: 7 + r() * 6, k1: 1 + (r() * 2 | 0), ph1: r() * TAU, a1: 0.15 + r() * 0.35,
     k2: 2 + (r() * 2 | 0), ph2: r() * TAU, a2: 0.01 + r() * 0.025, tq: 0.02 + r() * 0.08, k3: 1 + (r() * 2 | 0), ph3: r() * TAU,
-    tone: 0.88 + r() * 0.17, warm: (r() - 0.5) * 0.1, off: r() * 200,
+    tone: 0.93 + r() * 0.09, warm: (r() - 0.5) * 0.1, off: r() * 200,
   }));
   const starts = []; let acc = 0; for (const p of P) { starts.push(acc); acc += p.w; }
   const pxU = tileU / cw, pxV = tileV / H;
   const fu = (k) => k * TAU / tileU; // 周期的にする角周波数
+  for (const p of P) {
+    p.cx = new Float32Array(cw); p.tap = new Float32Array(cw);
+    for (let i = 0; i < cw; i++) {
+      const ux = (i + 0.5) * pxU;
+      p.cx[i] = p.c0 + p.a1 * Math.sin(fu(p.k1) * ux + p.ph1) + p.a2 * Math.sin(fu(p.k2) * ux + p.ph2);
+      p.tap[i] = p.tq * (1.2 + Math.sin(fu(p.k3) * ux + p.ph3));
+    }
+  }
   for (let j = 0; j < H; j++) {
     const wz = (j + 0.5) * pxV;
     let pi = 0; while (pi < P.length - 1 && wz >= starts[pi + 1]) pi++;
@@ -58,17 +66,15 @@ function paintWood({ W = 1024, H = 1024, tileU = 6, tileV = 5.5, planks = [1.05,
     const edge = Math.min(w, p.w - w); // 板端までの距離
     for (let i = 0; i < cw; i++) {
       const ux = (i + 0.5) * pxU;
-      const cx = p.c0 + p.a1 * Math.sin(fu(p.k1) * ux + p.ph1) + p.a2 * Math.sin(fu(p.k2) * ux + p.ph2);
-      const d = w - cx;
-      const tap = p.tq * (1.2 + Math.sin(fu(p.k3) * ux + p.ph3));
+      const cx = p.cx[i], d = w - cx, tap = p.tap[i];
       const warp = (fbm(ux * (1 / 3) + p.off, w * 1.2, 2, tileU / 3, 256) - 0.5) * 1.2 + (vn(ux + p.off, w * 8, tileU, 256) - 0.5) * 0.18;
       const ring = Math.sqrt(d * d + tap) * p.dens + warp;
       const f = ring - Math.floor(ring);
       const late = Math.pow(f, 5) * (1 - sstep(0.94, 1, f)) * 1.25;
       // 細い繊維の筋（u方向に長く, v方向に細かい）
       const streak = vn(ux * 2 + p.off, wz * 90, tileU * 2, 256) * 0.6 + vn(ux * 6 + p.off, wz * 260, tileU * 6, 256) * 0.4;
-      const broad = fbm(ux * 0.5 + p.off * 0.3, wz * 0.8, 3, tileU * 0.5, 256);
-      let v = p.tone * (1 - 0.32 * late - 0.16 * streak + 0.16 * (broad - 0.5));
+      const broad = fbm(ux * 0.5 + p.off * 0.3, wz * 0.8, 2, tileU * 0.5, 256);
+      let v = p.tone * (1 - 0.14 * late - 0.11 * streak + 0.12 * (broad - 0.5));
       let gap = 1;
       if (joints) { gap = 0.62 + 0.38 * sstep(0.003, 0.016, edge); }
       const o = (j * cw + i) * 4;
@@ -99,13 +105,13 @@ function paintWood({ W = 1024, H = 1024, tileU = 6, tileV = 5.5, planks = [1.05,
 
 // ---------- 漆喰の壁 ----------
 function paintWall(winC) {
-  const W = 512, H = 352, c = canvas(W, H), x = c.getContext('2d'), im = x.createImageData(W, H);
+  const W = 256, H = 176, c = canvas(W, H), x = c.getContext('2d'), im = x.createImageData(W, H);
   for (let j = 0; j < H; j++) for (let i = 0; i < W; i++) {
     const wx = -14 + 28 * i / W, wy = 16 - 19 * j / H;
-    const m = fbm(i / 40, j / 40, 4) - 0.5, m2 = vn(i / 6, j / 6) - 0.5;
+    const m = fbm(i / 20, j / 20, 3) - 0.5, m2 = vn(i / 3, j / 3) - 0.5;
     const dw = Math.hypot((wx - winC[0]) / 6, (wy - winC[1]) / 6);
     const glow = 0.07 * Math.exp(-dw * dw * 1.2);
-    const fall = -0.05 * sstep(4, 16, wy) - 0.04 * sstep(6, 14, Math.abs(wx));
+    const fall = -0.07 * sstep(3, 16, wy) - 0.06 * sstep(2, 14, wx) - 0.03 * sstep(8, 14, -wx);
     const v = 1 + m * 0.06 + m2 * 0.015 + glow + fall;
     const o = (j * W + i) * 4;
     im.data[o] = 238 * v; im.data[o + 1] = 231 * v; im.data[o + 2] = 219 * v; im.data[o + 3] = 255;
@@ -191,7 +197,7 @@ function paintParkBackdrop() {
 function paintGrass() {
   const S = 512, c = canvas(S, S), x = c.getContext('2d'), r = rng(91), im = x.createImageData(S, S);
   for (let j = 0; j < S; j++) for (let i = 0; i < S; i++) {
-    const n = fbm(i / 32, j / 32, 4, 16, 16), m = vn(i / 3, j / 3, 171, 171);
+    const n = fbm(i / 32, j / 32, 3, 16, 16), m = vn(i / 3, j / 3, 171, 171);
     const o = (j * S + i) * 4;
     const v = 0.55 + 0.5 * n + 0.15 * m;
     im.data[o] = 72 * v + 40 * (n - 0.5); im.data[o + 1] = 112 * v; im.data[o + 2] = 44 * v; im.data[o + 3] = 255;
@@ -344,7 +350,7 @@ export function createWorld(scene, renderer) {
   const woodMap = tex(wood.map, { repeat: true, aniso: maxAniso });
   const woodData = tex(wood.data, { srgb: false, repeat: true, aniso: maxAniso });
   const topMat = new THREE.MeshStandardMaterial({
-    map: woodMap, roughnessMap: woodData, bumpMap: woodData, bumpScale: 0.6, roughness: 0.62, metalness: 0,
+    map: woodMap, roughnessMap: woodData, bumpMap: woodData, bumpScale: 0.3, roughness: 0.62, metalness: 0,
   });
   const TOP = { x0: -6, x1: 6, z0: -4.4, z1: 6.6, th: 0.35 };
   const zMid = (TOP.z0 + TOP.z1) / 2; // 1.1: 前後2枚に分けて鏡映し（繰り返しを目立たせない）
@@ -404,7 +410,7 @@ export function createWorld(scene, renderer) {
   }
   // 床
   {
-    const fm = new THREE.MeshStandardMaterial({ map: woodMap, color: 0x8a7462, roughness: 0.7 });
+    const fm = new THREE.MeshStandardMaterial({ map: woodMap, color: 0x6e5a4c, roughness: 0.8 });
     const fg = new THREE.PlaneGeometry(40, 30); fg.rotateX(-Math.PI / 2);
     const uv = fg.attributes.uv; for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * 40 / 6 * 0.6, uv.getY(i) * 30 / 5.5 * 0.6);
     const f = new THREE.Mesh(fg, fm); f.position.set(0, -7.55, 8); f.receiveShadow = true; room.add(f);
@@ -415,14 +421,14 @@ export function createWorld(scene, renderer) {
   const WALLZ = -4.5;
   {
     const sh = new THREE.Shape();
-    sh.moveTo(-14, -3); sh.lineTo(14, -3); sh.lineTo(14, 16); sh.lineTo(-14, 16); sh.closePath();
+    sh.moveTo(-14, -8); sh.lineTo(14, -8); sh.lineTo(14, 16); sh.lineTo(-14, 16); sh.closePath();
     const hole = new THREE.Path();
     hole.moveTo(WIN.x0, WIN.y0); hole.lineTo(WIN.x0, WIN.y1); hole.lineTo(WIN.x1, WIN.y1); hole.lineTo(WIN.x1, WIN.y0); hole.closePath();
     sh.holes.push(hole);
     const g = new THREE.ShapeGeometry(sh);
     const p = g.attributes.position, uv = g.attributes.uv;
     const uv2 = new Float32Array(p.count * 2);
-    for (let i = 0; i < p.count; i++) { uv.setXY(i, (p.getX(i) + 14) / 28, (p.getY(i) + 3) / 19); uv2[i * 2] = p.getX(i) / 1.6; uv2[i * 2 + 1] = p.getY(i) / 1.6; }
+    for (let i = 0; i < p.count; i++) { uv.setXY(i, (p.getX(i) + 14) / 28, Math.max(0, (p.getY(i) + 3) / 19)); uv2[i * 2] = p.getX(i) / 1.6; uv2[i * 2 + 1] = p.getY(i) / 1.6; }
     g.setAttribute('uv1', new THREE.BufferAttribute(uv2, 2));
     const stucco = tex(paintStucco(), { srgb: false, repeat: true });
     stucco.channel = 1;
