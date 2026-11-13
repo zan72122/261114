@@ -187,7 +187,7 @@ const Vacuum = (() => {
     const dark = new THREE.MeshStandardMaterial({ color: 0x2b2d30, roughness: 0.78, roughnessMap: t.rubber, metalness: 0 });
     const darkGloss = new THREE.MeshPhysicalMaterial({ color: 0x26282b, roughness: 0.4, clearcoat: 0.3, clearcoatRoughness: 0.3 });
     const teal = new THREE.MeshPhysicalMaterial({ color: 0x1fa39a, roughness: 0.32, clearcoat: 0.5, clearcoatRoughness: 0.2 });
-    const alu = new THREE.MeshStandardMaterial({ color: 0xd9dcdf, map: t.hair, roughnessMap: t.hairR, roughness: 0.55, metalness: 1.0, envMapIntensity: 1.1 });
+    const alu = new THREE.MeshStandardMaterial({ color: 0xe2e6eb, map: t.hair, roughnessMap: t.hairR, roughness: 0.5, metalness: 0.45, envMapIntensity: 1.0 });
     const hose = new THREE.MeshStandardMaterial({ color: 0xc4c7ca, roughness: 0.52, metalness: 0 });
     const cradleGlow = new THREE.MeshStandardMaterial({ color: 0x1fa39a, roughness: 0.4, emissive: 0x1fa39a, emissiveIntensity: 0 });
     const powerLed = new THREE.MeshStandardMaterial({ color: 0x8fb8b4, roughness: 0.3, emissive: 0x3fe0d0, emissiveIntensity: 0 });
@@ -600,8 +600,8 @@ const Vacuum = (() => {
         P[b] -= dx * k * wb; P[b + 1] -= dy * k * wb; P[b + 2] -= dz * k * wb;
       }
       // 曲げのかたさ（i と i+2 が近づきすぎない）
-      if (it % 2 === 0) {
-        const minD = SEG * 1.55;
+      {
+        const minD = SEG * 1.85;
         for (let i = 0; i < n - 1; i++) {
           const a = i * 3, b = a + 6;
           const dx = P[b] - P[a], dy = P[b + 1] - P[a + 1], dz = P[b + 2] - P[a + 2];
@@ -609,7 +609,7 @@ const Vacuum = (() => {
           if (d >= minD) continue;
           const wa = (i <= 1 || i >= n - 1) ? 0 : 1, wb = (i + 2 <= 1 || i + 2 >= n - 1) ? 0 : 1;
           const ws = wa + wb; if (!ws) continue;
-          const k = (d - minD) / d / ws * 0.25;
+          const k = (d - minD) / d / ws * 0.5;
           P[a] += dx * k * wa; P[a + 1] += dy * k * wa; P[a + 2] += dz * k * wa;
           P[b] -= dx * k * wb; P[b + 1] -= dy * k * wb; P[b + 2] -= dz * k * wb;
         }
