@@ -13,12 +13,30 @@ html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#
 #c{position:fixed;left:0;top:0;width:100%;height:100%;display:block;touch-action:none;outline:none}
 #fade{position:fixed;inset:0;background:#fff;opacity:0;pointer-events:none}
 #fb{position:fixed;inset:0;display:none;background:#e9e2d6 center/contain no-repeat}
+#poster{position:fixed;inset:0;display:none;background:#e9e2d6 center/cover no-repeat;pointer-events:none;transition:opacity .45s ease-out}
 </style>
 </head>
 <body>
 <canvas id="c"></canvas>
 <div id="fade"></div>
 <div id="fb" data-src="/*__FALLBACK__*/"></div>
-<script>/*__BUNDLE__*/</script>
+<div id="poster"></div>
+<script>
+// 最初の場面の1枚絵を先に出す（初めて遊ぶ人・最初の場面から始まる人で、縦長の画面のときだけ）。
+// 3D の最初の1コマが描けたら engine がふわっと消す。
+(function(){try{
+  var w=innerWidth,h=innerHeight,a=w/h,s=null;
+  try{s=JSON.parse(localStorage.getItem('gf-261114-3')||'null');}catch(e){}
+  var fresh=!s||(s.stage==='fold'&&!(s.round>0)&&!(s.st&&s.st.length));
+  var src=document.getElementById('fb').getAttribute('data-src')||'';
+  if(fresh&&a>0.4&&a<0.62&&src.indexOf('data:')===0){var p=document.getElementById('poster');p.style.backgroundImage='url("'+src+'")';p.style.display='block';}
+}catch(e){}})();
+</script>
+<script type="text/plain" id="bundle">/*__BUNDLE__*/</script>
+<script>
+// 本体は1枚絵が画面に出てから動かす（大きなスクリプトの実行で最初の表示が遅れないように）。
+(function(){var run=function(){var b=document.getElementById('bundle'),s=document.createElement('script');s.text=b.textContent;b.parentNode.removeChild(b);document.body.appendChild(s);};
+if(window.requestAnimationFrame)requestAnimationFrame(function(){setTimeout(run,0);});else setTimeout(run,0);})();
+</script>
 </body>
 </html>

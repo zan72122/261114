@@ -42,7 +42,19 @@ function listenerSet() {
   };
 }
 
+// 起動中に出しておいた最初の場面の1枚絵を消す（3D が描けたらふわっと、描けないときはすぐ）。
+function hidePoster(now) {
+  try {
+    const el = document.getElementById('poster');
+    if (!el || el.style.display !== 'block') { if (el) el.remove(); return; }
+    if (now) { el.remove(); return; }
+    el.style.opacity = '0';
+    setTimeout(() => { try { el.remove(); } catch (_) { /* */ } }, 600);
+  } catch (_) { /* */ }
+}
+
 function showFallback(canvas) {
+  hidePoster(true);
   try {
     const fb = document.getElementById('fb');
     if (fb) {
@@ -529,7 +541,7 @@ export function createEngine() {
   canvas.addEventListener('webglcontextrestored', () => { engine.shadowDirty(); }, false);
 
   // ------------------------------------------------------------ loop / visibility
-  let started = false, rafId = 0, last = null, paused = false;
+  let started = false, rafId = 0, last = null, paused = false, posterFrames = 0;
   engine.onFrame = (fn) => L.frame.add(fn);
   engine.onVisibility = (fn) => L.vis.add(fn);
   engine.onQuality = (fn) => L.quality.add(fn);
@@ -552,6 +564,7 @@ export function createEngine() {
     L.frame.emit(dt, engine.time);
     try { updateShadowFlag(); } catch (err) { renderer.shadowMap.needsUpdate = true; }
     try { renderer.render(scene, camera); } catch (err) { try { console.error(err); } catch (_) { /* */ } }
+    if (posterFrames >= 0 && ++posterFrames >= 2) { posterFrames = -1; hidePoster(false); }
   }
   function pause() {
     if (paused) return;
