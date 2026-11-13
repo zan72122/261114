@@ -59,7 +59,7 @@ function ext(shape, depth, bev, curveSegments = 12, bevelSegments = 3, crease = 
 function flatPlate(x0, z0, x1, z1, r, t, bev, holes = []) {
   const s = rrShape(x0, -z1, x1, -z0, r);
   for (const h of holes) s.holes.push(rr(new THREE.Path(), h[0], -h[3], h[2], -h[1], h[4]));
-  const g = ext(s, t, bev, 8, 2);
+  const g = ext(s, t, bev, 8, 2, 0.3);
   g.rotateX(-PI / 2);
   return g;
 }
@@ -108,7 +108,7 @@ function threadTexture() {
 }
 function ridgeTexture(n) {
   return canvasTex(n * 4, 4, (g, w, h) => {
-    for (let x = 0; x < w; x++) { const v = x % 4 < 2 ? 230 : 60; g.fillStyle = `rgb(${v},${v},${v})`; g.fillRect(x, 0, 1, h); }
+    for (let x = 0; x < w; x++) { const v = x % 4 < 2 ? 215 : 105; g.fillStyle = `rgb(${v},${v},${v})`; g.fillRect(x, 0, 1, h); }
   });
 }
 function brushedTexture() {
@@ -138,7 +138,8 @@ export function createMachine() {
     accent: phys({ color: 0x9fcfc6, roughness: 0.35, clearcoat: 0.5, clearcoatRoughness: 0.25 }),
     chrome: std({ color: 0xe9ebee, metalness: 1, roughness: 0.13 }),
     brushed: std({ color: 0xcfd2d6, metalness: 1, roughness: 0.34, roughnessMap: brushed }),
-    steel: std({ color: 0x9a9ea4, metalness: 1, roughness: 0.42 }),
+    steel: std({ color: 0x8c9096, metalness: 1, roughness: 0.42 }),
+    dogs: std({ color: 0x55595e, metalness: 0.9, roughness: 0.5 }),
     clear: phys({ color: 0xe9f2f6, roughness: 0.06, transparent: true, opacity: 0.32, clearcoat: 1, depthWrite: false }),
     lens: std({ color: 0xdfe6ec, emissive: 0xf6f9ff, emissiveIntensity: 0, roughness: 0.25 }),
     thread: std({ color: 0xe0605a, roughness: 0.75 }),
@@ -147,6 +148,10 @@ export function createMachine() {
     felt: std({ color: 0x8fc4bb, roughness: 0.95 }),
   };
   mats.clear.userData.noShadow = true;
+  {
+    const rt = ridgeTexture(48); rt.repeat.set(2, 1);
+    mats.grip = std({ color: 0x80858b, roughness: 0.62, map: rt, bumpMap: rt, bumpScale: 3 });
+  }
   mats.lens.userData.noShadow = true;
   // flat decals sit a hair above surfaces
   for (const k of ['seam', 'black']) { mats[k].polygonOffset = true; mats[k].polygonOffsetFactor = -1; mats[k].polygonOffsetUnits = -1; }
@@ -207,10 +212,7 @@ export function createMachine() {
     const dial = lathe([[0, 0.14], [0.17, 0.14], [0.20, 0.135], [0.215, 0.12], [0.22, 0.03], [0.225, 0.0]], 48);
     dial.rotateX(PI / 2);
     S.add('body', dial, 1.5, 1.56, dz);
-    for (let i = 0; i < 40; i++) {
-      const a = (i / 40) * 2 * PI;
-      S.add('grey', rbox(0.022, 0.016, 0.1, 0.006, 1), 1.5 + Math.cos(a) * 0.218, 1.56 + Math.sin(a) * 0.218, dz + 0.075, 0, 0, a);
-    }
+    S.add('grip', new THREE.CylinderGeometry(0.228, 0.228, 0.085, 64, 1, true), 1.5, 1.56, dz + 0.07, PI / 2, 0, 0);
     S.add('accent', rbox(0.03, 0.12, 0.012, 0.005, 1), 1.5, 1.66, dz + 0.141);
     // tick marks around the dial (plain, no numerals)
     for (let i = 0; i <= 10; i++) {
@@ -220,7 +222,7 @@ export function createMachine() {
     // small stitch-length dial
     const sd = lathe([[0, 0.09], [0.09, 0.09], [0.105, 0.08], [0.11, 0.0]], 36); sd.rotateX(PI / 2);
     S.add('body', sd, 1.5, 1.14, dz);
-    for (let i = 0; i < 24; i++) { const a = (i / 24) * 2 * PI; S.add('grey', rbox(0.014, 0.012, 0.07, 0.004, 1), 1.5 + Math.cos(a) * 0.108, 1.14 + Math.sin(a) * 0.108, dz + 0.045, 0, 0, a); }
+    S.add('grip', new THREE.CylinderGeometry(0.114, 0.114, 0.055, 40, 1, true), 1.5, 1.14, dz + 0.042, PI / 2, 0, 0);
     S.add('dgrey', rbox(0.016, 0.07, 0.008, 0.003, 1), 1.5, 1.165, dz + 0.091);
     for (let i = 0; i < 5; i++) { const x = 1.36 + i * 0.07; S.add('dgrey', rbox(0.008, 0.025, 0.006, 0.002, 1), x, 1.29 + (i === 2 ? 0.01 : 0), FRONT + 0.026); }
   }
@@ -317,16 +319,16 @@ export function createMachine() {
 
   // ===== thread: static path spool -> guide -> down channel -> U-turn =====
   const SP = new V3(0.6, 3.0, -0.2); // spool pin base
-  const TH = 0.0065;
+  const TH = 0.0075;
   {
-    const zc = FRONT + 0.018;
+    const zc = FRONT + 0.024;
     const pts = [
       new V3(SP.x - 0.2, SP.y + 0.32, SP.z), new V3(-0.62, 3.05, 0.25), new V3(-0.78, 3.09, 0.24),
       new V3(-0.92, 3.06, 0.34), new V3(-0.995, 2.99, FRONT + 0.01), new V3(-1.01, 2.86, zc),
       new V3(-1.01, 1.95, zc), new V3(-1.04, 1.885, zc), new V3(-1.085, 1.87, zc), new V3(-1.13, 1.885, zc), new V3(-1.15, 1.93, zc),
     ];
     S.add('thread', tube(dense(pts, 0.06), TH, false, 260, 5));
-    const lower = [new V3(-1.15, 1.66, zc), new V3(-1.17, 1.58, FRONT - 0.03), new V3(NX + 0.06, 1.53, 0.40), new V3(NX + 0.06, 1.522, 0.38)];
+    const lower = [new V3(-1.15, 1.66, zc), new V3(-1.165, 1.58, FRONT - 0.01), new V3(NX + 0.06, 1.53, 0.40), new V3(NX + 0.06, 1.522, 0.38)];
     S.add('thread', tube(dense(lower, 0.03), TH, false, 40, 5));
   }
 
@@ -355,7 +357,7 @@ export function createMachine() {
     B.add('black', rbox(0.004, 0.022, 0.02, 0.001, 1), NX, TIP_UP + 0.045, NZ);   // eye
     // thread from bar guide down the needle front groove to the eye, then out the back
     const zc = NZ + 0.011;
-    const p = [new V3(NX, clampBot + 0.13, NZ + 0.048), new V3(NX, clampBot + 0.02, NZ + 0.05), new V3(NX, clampBot - 0.08, zc + 0.01), new V3(NX, TIP_UP + 0.07, zc), new V3(NX, TIP_UP + 0.045, NZ), new V3(NX, TIP_UP + 0.03, NZ - 0.04), new V3(NX - 0.01, TIP_UP - 0.02, NZ - 0.11)];
+    const p = [new V3(NX, clampBot + 0.13, NZ + 0.048), new V3(NX, clampBot + 0.02, NZ + 0.05), new V3(NX, clampBot - 0.08, zc + 0.01), new V3(NX, TIP_UP + 0.07, zc), new V3(NX, TIP_UP + 0.045, NZ), new V3(NX, TIP_UP + 0.035, NZ - 0.03), new V3(NX - 0.004, TIP_UP + 0.005, NZ - 0.055)];
     B.add('thread', tube(dense(p, 0.03), 0.0055, false, 60, 5));
     B.build(needle, mats);
   }
@@ -406,8 +408,8 @@ export function createMachine() {
     for (let i = n - 1; i >= 0; i--) { const a = z0 + (z1 - z0) * i / n, b = z0 + (z1 - z0) * (i + 1) / n; s.lineTo(a + (b - a) * 0.25, th); s.lineTo(a, 0); }
     s.closePath();
     const g = new THREE.ExtrudeGeometry(s, { depth: 0.03, bevelEnabled: false }); g.translate(0, 0, -0.015); g.rotateY(-PI / 2);
-    B.add('steel', g.clone(), NX - 0.091, 0, NZ);
-    B.add('steel', g, NX + 0.091, 0, NZ);
+    B.add('dogs', g.clone(), NX - 0.091, 0, NZ);
+    B.add('dogs', g, NX + 0.091, 0, NZ);
     B.build(dogs, mats, false, true);
   }
 
@@ -416,17 +418,14 @@ export function createMachine() {
   handwheel.position.set(2.0, 2.35, -0.03);
   {
     const B = new Bucket();
-    const w = lathe([[0.0, 0.135], [0.1, 0.135], [0.13, 0.128], [0.17, 0.11], [0.31, 0.105], [0.37, 0.12], [0.41, 0.15], [0.44, 0.15], [0.452, 0.14], [0.455, 0.02], [0.44, 0.0], [0.3, -0.02], [0.0, -0.02]], 72);
+    const w = lathe([[0.0, 0.112], [0.25, 0.112], [0.33, 0.118], [0.39, 0.135], [0.425, 0.15], [0.442, 0.147], [0.45, 0.135], [0.451, 0.125], [0.451, 0.02], [0.44, 0.003], [0.42, -0.01], [0.0, -0.01]], 72);
     w.rotateZ(-PI / 2);
     B.add('body', w);
-    const hub = lathe([[0, 0.16], [0.07, 0.155], [0.095, 0.14], [0.1, 0.12]], 40); hub.rotateZ(-PI / 2);
-    B.add('chrome', hub);
-    const grip = cyl(0.462, 0.462, 0.095, 96); grip.rotateZ(PI / 2); B.add('grip', grip, 0.075, 0, 0);
+    const hub = lathe([[0, 0.15], [0.06, 0.147], [0.085, 0.135], [0.09, 0.11]], 40); hub.rotateZ(-PI / 2);
+    B.add('grey', hub);
+    const grip = new THREE.CylinderGeometry(0.463, 0.463, 0.09, 96, 1, true); grip.rotateZ(PI / 2); B.add('grip', grip, 0.07, 0, 0);
     // a moulded index notch so rotation reads
-    B.add('accent', rbox(0.02, 0.17, 0.035, 0.008, 1), 0.112, 0.235, 0);
-    const gm = std({ color: 0x8e9399, roughness: 0.6 });
-    const rt = ridgeTexture(80); gm.bumpMap = rt; gm.bumpScale = 3; gm.map = rt; gm.map.colorSpace = THREE.NoColorSpace;
-    mats.grip = gm;
+    B.add('accent', rbox(0.02, 0.13, 0.03, 0.008, 1), 0.122, 0.33, 0);
     B.build(handwheel, mats);
     const hit = new THREE.Mesh(cyl(0.6, 0.6, 0.45, 16), new THREE.MeshBasicMaterial({ visible: false }));
     hit.rotation.z = PI / 2; hit.position.x = 0.12; hit.name = 'hit'; handwheel.add(hit);
@@ -459,7 +458,7 @@ export function createMachine() {
     _d.subVectors(b, a); const L = _d.length();
     m.position.copy(a); m.quaternion.setFromUnitVectors(UP, _d.multiplyScalar(1 / L)); m.scale.set(1, L, 1);
   }
-  const pA0 = new V3(-1.15, 1.93, FRONT + 0.018), pB1 = new V3(-1.15, 1.66, FRONT + 0.018), pC0 = new V3(NX + 0.06, 1.522, 0.38);
+  const pA0 = new V3(-1.15, 1.93, FRONT + 0.024), pB1 = new V3(-1.15, 1.66, FRONT + 0.024), pC0 = new V3(NX + 0.06, 1.522, 0.38);
   const pEye = new V3(), pBar = new V3();
 
   // ===== LED spotlight =====

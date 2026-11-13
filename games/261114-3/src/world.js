@@ -151,9 +151,9 @@ function paintParkBackdrop() {
   // u: 周囲360°, v: 下→上（canvas は上が空）。帯の下部は透明にして芝へ溶け込ませる
   const W = 1024, H = 256, c = canvas(W, H), x = c.getContext('2d'), r = rng(57);
   const sky = x.createLinearGradient(0, 0, 0, H * 0.7);
-  sky.addColorStop(0, '#8fb4dc'); sky.addColorStop(0.6, '#c3d8e8'); sky.addColorStop(1, '#dfe8e4');
+  sky.addColorStop(0, '#8fb4dc'); sky.addColorStop(0.45, '#bcd3e6'); sky.addColorStop(0.7, '#d4e0dc'); sky.addColorStop(1, '#a9bb92');
   x.fillStyle = sky; x.fillRect(0, 0, W, H);
-  const hz = H * 0.70; // 木立の根元
+  const hz = H * 0.83; // 木立の根元
   const greens = [[74, 104, 58], [96, 126, 70], [122, 148, 86], [58, 84, 50], [142, 164, 104], [108, 132, 78]];
   const draw = (cx, cy, rad, col, a) => { for (const o of [-W, 0, W]) if (cx + o + rad > 0 && cx + o - rad < W) blob(x, cx + o, cy, rad, col, a); };
   // 遠い木立（かすんだ緑）
@@ -175,7 +175,7 @@ function paintParkBackdrop() {
   }
   // 根元をかすみに
   const haze = x.createLinearGradient(0, hz - 30, 0, H);
-  haze.addColorStop(0, 'rgba(160,178,140,0)'); haze.addColorStop(0.5, 'rgba(140,162,112,0.6)'); haze.addColorStop(1, 'rgba(120,146,92,0.9)');
+  haze.addColorStop(0, 'rgba(150,170,120,0)'); haze.addColorStop(0.5, 'rgba(128,152,98,0.6)'); haze.addColorStop(1, 'rgba(112,140,80,0.9)');
   x.fillStyle = haze; x.fillRect(0, hz - 30, W, H - hz + 30);
   // 下端を透明に
   const im = x.getImageData(0, 0, W, H);
@@ -194,7 +194,7 @@ function paintGrass() {
     const n = fbm(i / 32, j / 32, 4, 16, 16), m = vn(i / 3, j / 3, 171, 171);
     const o = (j * S + i) * 4;
     const v = 0.55 + 0.5 * n + 0.15 * m;
-    im.data[o] = 58 * v + 10 * (n - 0.5) * 4; im.data[o + 1] = 92 * v; im.data[o + 2] = 38 * v; im.data[o + 3] = 255;
+    im.data[o] = 72 * v + 40 * (n - 0.5); im.data[o + 1] = 112 * v; im.data[o + 2] = 44 * v; im.data[o + 3] = 255;
   }
   x.putImageData(im, 0, 0);
   // 葉の筋（色ごとにまとめて描く）
@@ -222,8 +222,8 @@ function paintTuft() {
   for (let k = 0; k < 34; k++) {
     const bx = 30 + r() * 68, lean = (r() - 0.5) * 50, h = 50 + r() * 74;
     const g = x.createLinearGradient(0, H, 0, H - h);
-    const lt = 30 + r() * 30;
-    g.addColorStop(0, `hsl(95,40%,${lt * 0.45}%)`); g.addColorStop(1, `hsl(${80 + r() * 20},${40 + r() * 15}%,${lt}%)`);
+    const lt = 42 + r() * 26;
+    g.addColorStop(0, `hsl(95,35%,${lt * 0.85}%)`); g.addColorStop(1, `hsl(${80 + r() * 20},${40 + r() * 15}%,${lt}%)`);
     x.strokeStyle = g; x.lineWidth = 2 + r() * 2.2;
     x.beginPath(); x.moveTo(bx, H); x.quadraticCurveTo(bx + lean * 0.3, H - h * 0.6, bx + lean, H - h); x.stroke();
   }
@@ -232,8 +232,8 @@ function paintTuft() {
 function paintDapple() {
   const S = 256, c = canvas(S, S), x = c.getContext('2d'), r = rng(77);
   x.fillStyle = '#fff'; x.fillRect(0, 0, S, S);
-  for (let n = 0; n < 60; n++) {
-    const cx = r() * S, cy = r() * S, rad = 12 + r() * 34, v = 150 + r() * 50;
+  for (let n = 0; n < 30; n++) {
+    const cx = r() * S, cy = r() * S, rad = 12 + r() * 30, v = 170 + r() * 45;
     for (const ox of [-S, 0, S]) for (const oy of [-S, 0, S]) blob(x, cx + ox, cy + oy, rad, [v, v, v - 4], 0.5 + r() * 0.3);
   }
   // 小さな木漏れ日の抜け
@@ -247,7 +247,7 @@ function paintGingham() {
   // 1周期(2マス)=256px。平織りの糸を1画素ずつ表現。
   const S = 256, c = canvas(S, S), b = canvas(S, S);
   const x = c.getContext('2d'), y = b.getContext('2d'), im = x.createImageData(S, S), bm = y.createImageData(S, S);
-  const white = [246, 245, 239], blue = [62, 104, 170];
+  const white = [252, 251, 247], blue = [58, 100, 172];
   const th = 3; // 糸の太さ(px)
   for (let j = 0; j < S; j++) for (let i = 0; i < S; i++) {
     const sx = i < S / 2, sy = j < S / 2; // 縦糸が青 / 横糸が青
@@ -255,7 +255,7 @@ function paintGingham() {
     const warpTop = ((ti + tj) & 1) === 0;
     const fi = (i % th) / (th - 1), fj = (j % th) / (th - 1);
     const across = warpTop ? fi : fj; // 糸の断面上の位置
-    const shade = 0.82 + 0.18 * Math.sin(across * Math.PI);
+    const shade = 0.88 + 0.12 * Math.sin(across * Math.PI);
     const n = 0.96 + 0.08 * vn(warpTop ? i / 3 : j / 3, warpTop ? j / 40 : i / 40, 86, 7);
     const isBlue = warpTop ? sx : sy;
     const col = isBlue ? blue : white;
@@ -284,19 +284,19 @@ const PRESETS = {
     sunDir: [-7, 11, 4], sunCol: 0xfff0dc, sunI: 2.2,
     hemiSky: 0xfff6ea, hemiGround: 0xa88a6c, hemiI: 0.3,
     fillDir: [-6, 5, -6], fillCol: 0xdfe8f5, fillI: 0.35,
-    bg: 0xe6ded1, fog: 0xe6ded1, fogNear: 500, fogFar: 1000,
+    bg: 0xe6ded1, fog: 0xe6ded1, fogNear: 500, fogFar: 1000, env: 0.55,
   },
   park: {
-    sunDir: [6, 12, 5], sunCol: 0xfff3df, sunI: 2.9,
-    hemiSky: 0xbcd6f5, hemiGround: 0x6e8a46, hemiI: 1.05,
+    sunDir: [6, 12, 5], sunCol: 0xfff3df, sunI: 3.3,
+    hemiSky: 0xbcd6f5, hemiGround: 0x6e8a46, hemiI: 0.55,
     fillDir: [-5, 4, -6], fillCol: 0xd8e6ff, fillI: 0.25,
-    bg: 0x9dbfe2, fog: 0xc7d4cf, fogNear: 30, fogFar: 110,
+    bg: 0x9dbfe2, fog: 0x9fb07e, fogNear: 25, fogFar: 140, env: 0.38,
   },
   evening: {
     sunDir: [9, 6, 3], sunCol: 0xffb46e, sunI: 2.5,
     hemiSky: 0xd9c2b0, hemiGround: 0x5e6a35, hemiI: 0.85,
     fillDir: [-5, 4, -6], fillCol: 0xb8c2ec, fillI: 0.25,
-    bg: 0xd8b99a, fog: 0xd7c3a8, fogNear: 30, fogFar: 110,
+    bg: 0xd8b99a, fog: 0xa8a070, fogNear: 25, fogFar: 140, env: 0.3,
   },
 };
 
@@ -544,8 +544,8 @@ export function createWorld(scene, renderer) {
   // 背景（ぼけた木立と空）
   {
     const bt = tex(paintParkBackdrop()); bt.wrapS = THREE.RepeatWrapping;
-    const g = new THREE.CylinderGeometry(52, 52, 46, 48, 1, true);
-    g.translate(0, 46 / 2 - 6, 0);
+    const g = new THREE.CylinderGeometry(36, 36, 34, 48, 1, true);
+    g.translate(0, 34 / 2 - 5, 0);
     const bm = new THREE.MeshBasicMaterial({ map: bt, side: THREE.BackSide, fog: false, transparent: true, depthWrite: false });
     const m = new THREE.Mesh(g, bm); m.rotation.y = Math.PI * 0.5; m.renderOrder = -1; park.add(m);
     park.userData.backdrop = bm;
@@ -561,13 +561,13 @@ export function createWorld(scene, renderer) {
     for (let i = 0; i < p.count; i++) {
       const X = p.getX(i), Z = p.getZ(i);
       const ex = sstep(3.2, 5.3, Math.abs(X)), ez = sstep(2.7, 4.3, Math.abs(Z)), e = Math.max(ex, ez);
-      const rum = (fbm(X / 1.6 + 3, Z / 1.6 + 7, 3) - 0.45) * 0.09 * e;
+      const rum = (fbm(X / 1.3 + 3, Z / 1.3 + 7, 3) - 0.45) * 0.15 * e;
       const edge = Math.max(sstep(5.25, 5.5, Math.abs(X)), sstep(4.25, 4.5, Math.abs(Z)));
-      let y = 0.038 + 0.004 * (vn(X * 1.3, Z * 1.3) - 0.5) + Math.max(-0.02, rum) - 0.026 * edge;
+      let y = 0.038 + 0.004 * (vn(X * 1.3 + 30, Z * 1.3 + 30) - 0.5) + Math.max(-0.02, rum) - 0.03 * edge;
       // 端の不揃い
       const jx = (vn(Z * 0.9 + 50, 2) - 0.5) * 0.12 * sstep(5.0, 5.5, Math.abs(X));
       const jz = (vn(X * 0.9 + 70, 5) - 0.5) * 0.12 * sstep(4.0, 4.5, Math.abs(Z));
-      p.setXYZ(i, X + jx * Math.sign(X), Math.max(0.012, y), Z + jz * Math.sign(Z));
+      p.setXYZ(i, X + jx * Math.sign(X), Math.min(0.085, Math.max(0.012, y)), Z + jz * Math.sign(Z));
       const s = 0.95 + 0.07 * fbm(X / 2 + 11, Z / 2, 2);
       col[i * 3] = col[i * 3 + 1] = col[i * 3 + 2] = s;
     }
@@ -592,7 +592,7 @@ export function createWorld(scene, renderer) {
     const idx = []; for (let k = 0; k < 3; k++) idx.push(k * 4, k * 4 + 2, k * 4 + 1, k * 4 + 2, k * 4 + 3, k * 4 + 1);
     merged.setIndex(idx);
     const mat = new THREE.MeshStandardMaterial({ map: tt, alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.9, color: 0xdfe8cf });
-    const N = 420, im = new THREE.InstancedMesh(merged, mat, N), r = rng(123), o = new THREE.Object3D(), cc = new THREE.Color();
+    const N = 300, im = new THREE.InstancedMesh(merged, mat, N), r = rng(123), o = new THREE.Object3D(), cc = new THREE.Color();
     let k = 0;
     while (k < N) {
       const X = (r() - 0.5) * 26, Z = (r() - 0.5) * 22;
@@ -601,8 +601,8 @@ export function createWorld(scene, renderer) {
       const dEdge = Math.max(Math.abs(X) - 5.5, Math.abs(Z) - 4.5);
       if (dEdge > 1.2 && r() < 0.65) continue;
       o.position.set(X, -0.02, Z); o.rotation.set((r() - 0.5) * 0.25, r() * TAU, (r() - 0.5) * 0.25);
-      const s = 0.5 + r() * 0.7; o.scale.set(s, s * (0.7 + r() * 0.5), s); o.updateMatrix();
-      im.setMatrixAt(k, o.matrix); cc.setHSL(0.24 + r() * 0.04, 0.35, 0.42 + r() * 0.18); im.setColorAt(k, cc); k++;
+      const s = 0.35 + r() * 0.45; o.scale.set(s, s * (0.7 + r() * 0.5), s); o.updateMatrix();
+      im.setMatrixAt(k, o.matrix); cc.setHSL(0.2 + r() * 0.06, 0.25, 0.75 + r() * 0.2); im.setColorAt(k, cc); k++;
     }
     im.receiveShadow = true; park.add(im); return im;
   })();
@@ -658,6 +658,7 @@ export function createWorld(scene, renderer) {
     hemi.intensity = P.hemiI + (E.hemiI - P.hemiI) * k;
     fill.position.set(...P.fillDir); fill.color.copy(lc(P.fillCol, E.fillCol)); fill.intensity = P.fillI;
     scene.background.copy(lc(P.bg, E.bg));
+    scene.environmentIntensity = P.env + (E.env - P.env) * k;
     scene.fog.color.copy(lc(P.fog, E.fog)); scene.fog.near = P.fogNear; scene.fog.far = P.fogFar;
     if (park.userData.backdrop) park.userData.backdrop.color.copy(C1.set(0xffffff).lerp(C2.set(0xffd6a8), k * 0.8));
     dapple.material.uniforms.strength.value = 1 - 0.35 * k;

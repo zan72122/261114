@@ -15,10 +15,12 @@ const views = {
   sewer: () => { camera.position.set(-1.55, 3.2, 4.2); camera.lookAt(N); },
   close: () => { camera.position.set(-0.4, 1.6, 1.7); camera.lookAt(-1.2, 1.0, 0.1); },
   left: () => { camera.position.set(-7, 3.5, 5); camera.lookAt(0, 1.4, 0); },
+  head: () => { camera.position.set(-0.2, 2.9, 3.2); camera.lookAt(-1.1, 2.3, 0.3); },
+  wheel: () => { camera.position.set(4.6, 3.0, 1.6); camera.lookAt(1.6, 2.0, 0); },
   right: () => { camera.position.set(7, 4, 5); camera.lookAt(0, 1.6, 0); },
 };
 window.setView = (v) => { views[v](); camera.updateMatrixWorld(); };
-window.M = m;
+window.M = m; window.cam = (p, l) => { camera.position.set(...p); camera.lookAt(...l); };
 window.phi = null;
 let t = 0;
 onFrame((dt) => {
