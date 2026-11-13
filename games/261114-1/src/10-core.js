@@ -31,6 +31,9 @@
   var dimMul = 1, lastAppliedExposure = -1;
   var safeProbe = null;
   var prLevels = [1], prLevel = 0, frameEma = 16.7, slowT = 0, fastT = 0, graceT = 1.5;
+  // 画素の予算: iPad など大きな画面で devicePixelRatio をそのまま使うと塗りが重すぎるため、
+  // 最初は「幅×高さ×pr² ≦ PX_BUDGET」になる段から始め、余裕が続けば上げる。
+  var PX_BUDGET = 2.6e6, prCeil = 0, upAt = -1e9, nowT = 0;
 
   C.init = function (canvas) {
     try {
@@ -42,6 +45,11 @@
       r.toneMappingExposure = 1;
       r.shadowMap.enabled = true;
       r.shadowMap.type = THREE.PCFSoftShadowMap;
+      // 影マップは「影を落とす物か光が動いたフレームだけ」描き直す（shadowSync）
+      r.shadowMap.autoUpdate = false;
+      r.shadowMap.needsUpdate = true;
+      // シェーダーのエラー確認（getProgramInfoLog 等の同期待ち）を省き、コンパイル時の引っかかりを減らす
+      r.debug.checkShaderErrors = false;
       r.localClippingEnabled = true;
       r.setClearColor(0x201812, 1);
       C.renderer = r; C.canvas = canvas;
@@ -50,13 +58,13 @@
       C.camera.position.set(0, 8, 6); C.camera.lookAt(0, 0, 0);
       C.scene.add(C.camera);
       canvas.addEventListener('webglcontextlost', function (e) { try { e.preventDefault(); } catch (_) {} C.lost = true; }, false);
-      canvas.addEventListener('webglcontextrestored', function () { C.lost = false; }, false);
+      canvas.addEventListener('webglcontextrestored', function () { C.lost = false; sigReady = false; if (C.renderer) C.renderer.shadowMap.needsUpdate = true; }, false);
 
       var maxPR = Math.min(window.devicePixelRatio || 1, 2), minPR = 0.6;
       prLevels = [];
       for (var pr = maxPR; pr > minPR * 1.05; pr *= 0.82) prLevels.push(pr);
       prLevels.push(Math.min(minPR, maxPR));
-      prLevel = 0;
+      prLevel = 0; prCeil = 0;
 
       safeProbe = document.createElement('div');
       safeProbe.style.cssText = 'position:fixed;left:0;top:0;width:0;height:0;visibility:hidden;pointer-events:none;' +
@@ -110,6 +118,7 @@
     if (!changed) return;
     C.size.w = v.w; C.size.h = v.h; C.safe = s;
     C.aspect = v.w / v.h;
+    budgetLevel();
     applyPR();
     C.camera.aspect = C.aspect;
     C.camera.updateProjectionMatrix();
@@ -117,17 +126,86 @@
   }
   C._resize = resize;
 
+  // 画面の大きさに対して予算内に収まる段まで下げる（上げるのは perf に任せる）
+  function budgetLevel() {
+    var px = C.size.w * C.size.h, lv = prCeil;
+    while (lv < prLevels.length - 1 && px * prLevels[lv] * prLevels[lv] > PX_BUDGET) lv++;
+    if (lv > prLevel) prLevel = lv;
+  }
+
   function perf(rawMs, dt) {
-    frameEma += (rawMs - frameEma) * 0.08;
+    nowT += dt;
+    // 1回だけの長い停止（コンパイル・GC）で平均が跳ねないよう上限を切る
+    frameEma += (Math.min(rawMs, 60) - frameEma) * 0.08;
     if (graceT > 0) { graceT -= dt; slowT = fastT = 0; return; }
-    if (frameEma > 40) { slowT += dt; fastT = 0; } else if (frameEma < 22) { fastT += dt; slowT = 0; } else { slowT = fastT = 0; }
-    if (slowT > 1.5 && prLevel < prLevels.length - 1) {
+    // 約48fps を割る状態が続けば解像度を1段下げ、60fps 近くが長く続けば1段上げる
+    if (frameEma > 21) { slowT += dt; fastT = 0; } else if (frameEma < 17.6) { fastT += dt; slowT = 0; } else { slowT = fastT = 0; }
+    if (slowT > 1.2 && prLevel < prLevels.length - 1) {
+      // 上げてすぐ重くなった段には二度と上がらない（行き来で引っかからないように）
+      if (nowT - upAt < 10) prCeil = Math.max(prCeil, prLevel + 1);
       prLevel++; applyPR(); slowT = 0; graceT = 1;
       if (prLevel === prLevels.length - 1) C.low = true;
-    } else if (fastT > 5 && prLevel > 0) {
-      prLevel--; applyPR(); fastT = 0; graceT = 1;
+    } else if (fastT > 6 && prLevel > prCeil) {
+      prLevel--; applyPR(); fastT = 0; graceT = 1; upAt = nowT;
     }
   }
+
+  /* 影マップの描き直し判定: 影を落とす見えている物の位置・形・材質と、太陽の位置・影の範囲を
+     前のフレームと比べ、変わったときだけ描き直す（カメラだけが動くときは描き直さない）。 */
+  var sigReady = false, sigBuf = [], sigN = 0, sigAge = 0, lightPending = false;
+  function sigPush(v) { if (sigBuf[sigN] !== v) { sigBuf[sigN] = v; sigChanged = true; } sigN++; }
+  var sigChanged = false;
+  function sigMat(m) { if (m) { sigPush(m.id); sigPush(m.visible ? 1 : 0); sigPush(m.side); } }
+  function sigObj(o) {
+    if (!o.visible) return;
+    if (o.castShadow && (o.isMesh || o.isLine || o.isPoints)) {
+      var e = o.matrixWorld.elements, g = o.geometry, k;
+      sigPush(o.id);
+      for (k = 0; k < 16; k++) sigPush(e[k]);
+      if (g) {
+        sigPush(g.id);
+        var pa = g.attributes.position; sigPush(pa ? pa.version : -1);
+        sigPush(g.index); sigPush(g.index ? g.index.version : -1);
+        sigPush(g.drawRange.start); sigPush(g.drawRange.count);
+      }
+      if (Array.isArray(o.material)) for (k = 0; k < o.material.length; k++) sigMat(o.material[k]); else sigMat(o.material);
+      if (o.customDepthMaterial) sigPush(o.customDepthMaterial.id);
+      if (o.morphTargetInfluences) for (k = 0; k < o.morphTargetInfluences.length; k++) sigPush(o.morphTargetInfluences[k]);
+      if (o.isInstancedMesh) { sigPush(o.count); sigPush(o.instanceMatrix.version); }
+    }
+    var ch = o.children;
+    for (var i = 0; i < ch.length; i++) sigObj(ch[i]);
+  }
+  function shadowSync() {
+    var r = C.renderer, sc = C.scene;
+    if (!r.shadowMap.enabled) return;
+    // 形の作り直し（ぎょうざは updateMatrixWorld で作り直す）を先に済ませてから比べる
+    if (sc.matrixWorldAutoUpdate) sc.updateMatrixWorld();
+    sigN = 0; sigChanged = false;
+    var hasLight = false, lightJump = false;
+    sc.traverseVisible(function (o) {
+      if (o.isLight && o.castShadow && o.shadow) {
+        hasLight = true;
+        var e = o.matrixWorld.elements, t = o.target ? o.target.matrixWorld.elements : null, pm = o.shadow.camera.projectionMatrix.elements, k, b;
+        sigPush(o.id);
+        for (k = 12; k < 15; k++) { b = sigBuf[sigN]; if (!(Math.abs(e[k] - b) < 0.05)) lightJump = true; sigPush(e[k]); }
+        if (t) for (k = 12; k < 15; k++) { b = sigBuf[sigN]; if (!(Math.abs(t[k] - b) < 0.05)) lightJump = true; sigPush(t[k]); }
+        for (k = 0; k < 16; k++) { if (sigBuf[sigN] !== pm[k]) lightJump = true; sigPush(pm[k]); }
+        sigPush(o.shadow.mapSize.x); sigPush(o.shadow.mapSize.y); sigPush(o.shadow.bias); sigPush(o.shadow.normalBias); sigPush(o.shadow.radius);
+      }
+    });
+    if (!hasLight) return;
+    var lightChanged = sigChanged;
+    sigChanged = false;
+    sigObj(sc);
+    if (sigBuf.length !== sigN) { sigBuf.length = sigN; sigChanged = true; }
+    sigAge++;
+    // 夕方への移り変わりのように光だけがゆっくり動くときは、4フレームに1回で十分（止まったら必ず追いつく）
+    if (lightChanged && !lightJump && !sigChanged && sigReady) { lightPending = true; if (sigAge < 4) return; }
+    else if (!sigChanged && !lightPending && sigReady) return;
+    r.shadowMap.needsUpdate = true; sigReady = true; sigAge = 0; lightPending = false;
+  }
+  C.shadowDirty = function () { if (C.renderer) C.renderer.shadowMap.needsUpdate = true; };
 
   function runList(list, dt) {
     for (var i = 0; i < list.length; i++) {
@@ -156,6 +234,7 @@
     }
     r.toneMappingExposure = lastAppliedExposure = C.exposure * dimMul;
     if (!C.lost) {
+      try { shadowSync(); } catch (e) { r.shadowMap.needsUpdate = true; if (!C._sErr) { C._sErr = 1; logErr('shadowSync', e); } }
       try { r.render(C.scene, C.camera); } catch (e) { if (!C._rErr) { C._rErr = 1; logErr('render', e); } }
     }
   }

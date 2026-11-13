@@ -56,6 +56,14 @@
     G.core.start();
     tryDo('go', function () { G.flow.go(first); });
     G.core.fade(0, 0.8);
+
+    // 最初の絵が出たあと、まだ見えていない道具（ほかの場面の物）のシェーダーも先にコンパイルしておく。
+    // 場面が変わった瞬間のコンパイルによる引っかかりを防ぐ。
+    var waitF = 3;
+    (function pre() {
+      if (--waitF > 0) { requestAnimationFrame(pre); return; }
+      tryDo('precompile', function () { var c = G.core; if (c.renderer && !c.lost) c.renderer.compile(c.scene, c.camera); });
+    })();
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
