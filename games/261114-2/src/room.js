@@ -386,7 +386,7 @@ const Room = (() => {
   }
 
   // ------------------------------------------------------------ ラグ・跡・房
-  let trackCtx = null, trackTex = null;
+  let trackCtx = null, trackTex = null, trackMesh = null, trackDirty = false, trackWait = 0;
   const TRK = 1024;
   let fringe = null;
   const NF = 88, fX = new Float32Array(NF), fJit = new Float32Array(NF), fLen = new Float32Array(NF), fPh = new Float32Array(NF), fA = new Float32Array(NF);
@@ -404,6 +404,7 @@ const Room = (() => {
     envMats.push(trMat);
     const tr = new THREE.Mesh(new THREE.PlaneGeometry(w, d), trMat);
     tr.rotation.x = -Math.PI / 2; tr.position.set(cx, g.pile + 0.0006, cz); tr.renderOrder = 1; tr.receiveShadow = true;
+    tr.visible = false; trackMesh = tr; // 最初の跡がつくまでは描かない（ラグ全面の半透明 PBR の塗りを省く）
     scene.add(tr);
     // 房（南端 NF 本 + 北端 NF 本）
     const fg = new THREE.CylinderGeometry(0.0028, 0.002, 1, 5, 1);
@@ -441,7 +442,7 @@ const Room = (() => {
       fringe.setMatrixAt(i, _m);
     }
     _e.order = 'XYZ';
-    fringe.instanceMatrix.needsUpdate = true;
+    markIfChanged(fringe);
     fMax = mx;
   }
   function paintTrack(x0, z0, x1, z1) {
@@ -461,7 +462,7 @@ const Room = (() => {
     const t = -dz / len; // + = 奥へ押す
     ctx.fillStyle = t >= 0 ? `rgba(255,253,248,${(0.04 + 0.035 * t).toFixed(3)})` : `rgba(96,86,74,${(0.03 + 0.035 * -t).toFixed(3)})`;
     ctx.fill();
-    trackTex.needsUpdate = true;
+    trackDirty = true; // 転送は update でまとめて（1024² の転送を毎フレームしない）
   }
   function setFringe(hx, hz, suction) {
     fHx = +hx || 0; fHz = +hz || 0; fSuc = sat(+suction || 0);
@@ -937,7 +938,7 @@ const Room = (() => {
       _e.set(b.rx, b.ph, b.rz); _q.setFromEuler(_e);
       _m.compose(b.p, _q, _s.set(sc, sc, sc)); bits.setMatrixAt(i, _m);
     }
-    bits.instanceMatrix.needsUpdate = true;
+    markIfChanged(bits);
   }
 
   // ------------------------------------------------------------ 接地の影
@@ -1025,15 +1026,26 @@ const Room = (() => {
     applyQuality();
     setTime(timeT);
   }
+  const imSnap = new Map();
+  function markIfChanged(im) {
+    const a = im.instanceMatrix.array;
+    let b = imSnap.get(im);
+    if (!b) { b = new Float32Array(a.length); imSnap.set(im, b); im.instanceMatrix.needsUpdate = true; b.set(a); return; }
+    for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) { b.set(a); im.instanceMatrix.needsUpdate = true; return; }
+  }
   function update(dt, time) {
     if (!ready) return;
     dt = clamp(+dt || 0, 0, 0.05);
     T = typeof time === 'number' && isFinite(time) ? time : T + dt;
     for (const k of kusu) stepKusu(k, dt);
-    strings.instanceMatrix.needsUpdate = true; fittings.instanceMatrix.needsUpdate = true; streamers.instanceMatrix.needsUpdate = true;
+    // 変わったときだけ転送する（止まっている間は GPU への転送も影の描き直しも要らない）
+    markIfChanged(strings); markIfChanged(fittings); markIfChanged(streamers);
     stepBits(dt);
     updateFringe(dt);
     fSuc = 0;
+    // ラグの跡: 1024² のキャンバスの GPU 転送は 1/15 秒に 1 回まで（跡はヘッドの後ろに残るので遅れは見えない）
+    trackWait -= dt;
+    if (trackDirty && trackWait <= 0) { trackTex.needsUpdate = true; trackMesh.visible = true; trackDirty = false; trackWait = 1 / 15; }
     // ごみ箱のふた
     lidA = damp(lidA, lidT, 7, dt);
     lidGrp.rotation.x = -lidA * 75 * D;

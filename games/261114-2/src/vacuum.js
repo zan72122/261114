@@ -628,7 +628,13 @@ const Vacuum = (() => {
     return 0.5 * (2 * p1 + (-p0 + p2) * f + (2 * p0 - 5 * p1 + 4 * p2 - p3) * f2 + (-p0 + 3 * p1 - 3 * p2 + p3) * f3);
   }
   const nV = new THREE.Vector3(), bV = new THREE.Vector3(), tV = new THREE.Vector3();
+  // 前回描いたときの節の位置。ホースが止まっているときは頂点の作り直し・転送（約 14 万バイト/フレーム）を省く
+  const DP = new Float32Array(NS * 3).fill(1e9);
   function drawHose() {
+    let moved = false;
+    for (let i = 0; i < DP.length; i++) if (Math.abs(P[i] - DP[i]) > 1e-5) { moved = true; break; }
+    if (!moved) return;
+    DP.set(P);
     const n = NS - 1;
     const at = (i, c) => {
       if (i < 0) return 2 * P[c] - P[3 + c];

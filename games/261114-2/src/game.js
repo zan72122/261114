@@ -44,11 +44,16 @@ const Game = (() => {
   }
 
   // ---- 品質（動的解像度）----
-  const QS = [1, 0.85, 0.7, 0.6];
-  let qIdx = 0, avgMs = 16, slowT = 0, perfWarm = 2;
+  // 描く画素数の上限（物理ピクセル）。iPhone 縦（390×844 @2x ≒ 132 万）はそのまま、
+  // iPad（834×1194 @2x ≒ 400 万、1024×1366 @2x ≒ 560 万）は 2x より少し下げて 1 フレームの塗りを抑える
+  const PIX_BUDGET = 2.6e6;
+  const QS = [1, 0.88, 0.76, 0.66];
+  let qIdx = 0, avgMs = 16, slowT = 0, perfWarm = 2, perfDone = false, prevAvg = 0, probing = false;
   function applySize() {
     dprNow = window.devicePixelRatio || 1;
-    renderer.setPixelRatio(Math.min(dprNow, Base.quality.maxDpr) * QS[qIdx]);
+    let pr = Math.min(dprNow, Base.quality.maxDpr);
+    pr = Math.min(pr, Math.max(1, Math.sqrt(PIX_BUDGET / (W * H))));
+    renderer.setPixelRatio(pr * QS[qIdx]);
     renderer.setSize(W, H, false);
     const r = canvas.getBoundingClientRect();
     rectL = r.left; rectT = r.top;
@@ -63,20 +68,88 @@ const Game = (() => {
       applySize();
     }
   }
+  function setQuality(i) {
+    qIdx = i;
+    // 段 2 以降は影の解像度を下げる（影そのものは消さない: 消すと全シェーダーの作り直しで大きく止まる）
+    const low = qIdx >= 2;
+    if (low !== Base.quality.low) {
+      Base.quality.low = low;
+      try { Room.applyQuality(); } catch (e) { /* 続行 */ }
+      shadowDirty = true;
+    }
+    applySize();
+  }
+  // 1.5 秒続けて 60fps に届かない（約 38fps 未満）ときに 1 段ずつ解像度を下げる。
+  // 下げても速くならない（省電力モードなどで 30fps に固定されている）ときは元に戻して、それ以上は下げない
   function perf(real) {
-    if (real > 0.5) return; // 一時停止明けなどは無視
+    if (perfDone || real > 0.5) return; // 一時停止明けなどは無視
     if (perfWarm > 0) { perfWarm -= real; return; }
     avgMs = avgMs * 0.92 + real * 1000 * 0.08;
-    if (avgMs > 40) slowT += real; else slowT = 0;
-    if (slowT > 1.5 && qIdx < QS.length - 1) {
-      if (QS[qIdx] <= 0.7 && !Base.quality.low) {
-        Base.quality.shadows = false; Base.quality.low = true;
-        try { Room.applyQuality(); } catch (e) { /* 続行 */ }
-      }
-      qIdx++;
-      slowT = 0; avgMs = 25; perfWarm = 1;
-      applySize();
+    if (probing) {
+      slowT += real;
+      if (slowT < 1.5) return;
+      probing = false; slowT = 0;
+      if (avgMs > prevAvg * 0.9) { setQuality(qIdx - 1); perfDone = true; return; }
     }
+    if (avgMs > 26) slowT += real; else slowT = 0;
+    if (slowT > 1.5) {
+      if (qIdx >= QS.length - 1) { perfDone = true; return; }
+      prevAvg = avgMs; probing = true;
+      slowT = 0; perfWarm = 0.5;
+      setQuality(qIdx + 1);
+    }
+  }
+
+  // ---- 影の描き直しは「影を落とす物が動いたときだけ」----
+  // 部屋の家具・壁は止まっているので、そうじきやくす玉が止まっている間は前の影をそのまま使う
+  let shadowDirty = true, sunLight = null, castN = 0, castPrev = -1;
+  const shadowRec = new Map();
+  const sunRec = new Float64Array(33);
+  function recChanged(o, vis) {
+    let r = shadowRec.get(o);
+    if (!r) { r = { m: new Float64Array(16), v: -1, iv: -1, n: -1, g: null, on: false }; shadowRec.set(o, r); }
+    const on = vis && o.castShadow;
+    if (!on) { if (r.on) { r.on = false; return true; } return false; }
+    let ch = !r.on; r.on = true; castN++;
+    const e = o.matrixWorld.elements, m = r.m;
+    for (let i = 0; i < 16; i++) if (m[i] !== e[i]) { m[i] = e[i]; ch = true; }
+    const g = o.geometry, pa = g && g.attributes && g.attributes.position;
+    const v = pa ? pa.version : 0;
+    if (g !== r.g || v !== r.v) { r.g = g; r.v = v; ch = true; }
+    if (o.isInstancedMesh) {
+      if (o.instanceMatrix.version !== r.iv || o.count !== r.n) { r.iv = o.instanceMatrix.version; r.n = o.count; ch = true; }
+    }
+    return ch;
+  }
+  function walkShadow(o, vis) {
+    vis = vis && o.visible;
+    let ch = false;
+    if (o.isMesh || o.isLine || o.isPoints) ch = recChanged(o, vis);
+    const c = o.children;
+    for (let i = 0; i < c.length; i++) if (walkShadow(c[i], vis)) ch = true;
+    return ch;
+  }
+  function updateShadowFlag() {
+    const sm = renderer.shadowMap;
+    if (!sunLight) {
+      scene.traverse(o => { if (!sunLight && o.isDirectionalLight && o.castShadow) sunLight = o; });
+      if (!sunLight) return;
+      sm.autoUpdate = false;
+    }
+    scene.updateMatrixWorld();
+    castN = 0;
+    let ch = walkShadow(scene, true);
+    if (castN !== castPrev) { castPrev = castN; ch = true; } // 影を落とす物が減った（外された）とき
+    // 太陽の向き・影の範囲・解像度・影の有無
+    const sh = sunLight.shadow, a = sunLight.matrixWorld.elements, b = sh.camera.projectionMatrix.elements;
+    for (let i = 0; i < 16; i++) {
+      if (sunRec[i] !== a[i]) { sunRec[i] = a[i]; ch = true; }
+      if (sunRec[16 + i] !== b[i]) { sunRec[16 + i] = b[i]; ch = true; }
+    }
+    const on = sunLight.castShadow ? sh.mapSize.x : 0;
+    if (sunRec[32] !== on) { sunRec[32] = on; ch = true; }
+    if (!sh.map) ch = true;
+    if (ch || shadowDirty) { sm.needsUpdate = true; shadowDirty = false; }
   }
 
   // ---- カメラ ----
@@ -821,6 +894,7 @@ const Game = (() => {
     time += dt;
     try {
       step(dt);
+      updateShadowFlag();
       renderer.render(scene, camera);
       perf(real);
     } catch (e) { /* 1 フレームの失敗で止めない */ }
@@ -837,10 +911,26 @@ const Game = (() => {
     if (running || document.hidden || !started) return;
     running = true;
     lastNow = performance.now();
-    perfWarm = 1; slowT = 0;
-    needResize = true;
+    perfWarm = 1; slowT = 0; probing = false;
+    needResize = true; shadowDirty = true;
     try { Sfx.setActive(true); } catch (e) { /* 続行 */ }
     raf = requestAnimationFrame(frame);
+  }
+
+  // ---- シェーダーの先読み ----
+  // 遊びの途中で初めて見える物（紙ふぶき・カップの中身・夕方の照明など）のシェーダーを起動時にまとめて作っておく。
+  // （途中で作ると iPhone / iPad で数十〜数百 ms 止まる）
+  function precompile() {
+    try {
+      renderer.compile(scene, camera);
+      // 影の深度シェーダーは影の描画時に作られるので、いったん全部見える状態で影だけ描く
+      const hidden = [];
+      scene.traverse(o => { if (!o.visible) { hidden.push(o); o.visible = true; } });
+      renderer.compile(scene, camera);
+      renderer.render(scene, camera);
+      for (const o of hidden) o.visible = false;
+      shadowDirty = true;
+    } catch (e) { /* 先読みできなくても遊べる */ }
   }
 
   // ---- 起動 ----
@@ -902,6 +992,7 @@ const Game = (() => {
       viewName = 'before'; camT = camDur = 0;
       updateCamera(0);
       enter(POP);
+      precompile();
 
       // 入力
       canvas.addEventListener('pointerdown', onDown, { passive: false });

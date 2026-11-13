@@ -34,6 +34,8 @@ const Base = (() => {
     r.shadowMap.enabled = true;
     r.shadowMap.type = THREE.PCFSoftShadowMap;
     r.setClearColor(0xd9d2c5, 1);
+    // シェーダーのエラー確認（getProgramInfoLog 等）は GPU と同期して止まるので本番では行わない
+    r.debug.checkShaderErrors = false;
     return r;
   }
 
