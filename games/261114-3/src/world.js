@@ -533,124 +533,146 @@ export function createWorld(scene, renderer) {
   const tRoom = performance.now() - T0;
 
   // ======================= 公園 =======================
-  const T1 = performance.now();
-  // 芝
-  const grassMap = tex(paintGrass(), { repeat: true, aniso: maxAniso });
-  grassMap.repeat.set(160 / 3.2, 160 / 3.2);
-  {
-    const g = new THREE.PlaneGeometry(160, 160, 64, 64); g.rotateX(-Math.PI / 2);
-    const p = g.attributes.position, col = new Float32Array(p.count * 3);
-    for (let i = 0; i < p.count; i++) {
-      const X = p.getX(i), Z = p.getZ(i);
-      const n = fbm(X / 9 + 40, Z / 9 + 40, 3), m = vn(X / 3 + 9, Z / 3 + 9);
-      const v = 0.8 + 0.35 * n + 0.08 * m;
-      col[i * 3] = v * (1 + 0.12 * (n - 0.5)); col[i * 3 + 1] = v; col[i * 3 + 2] = v * 0.92;
-    }
-    g.setAttribute('color', new THREE.BufferAttribute(col, 3));
-    const gm = new THREE.MeshStandardMaterial({ map: grassMap, bumpMap: grassMap, bumpScale: 1.2, vertexColors: true, roughness: 0.95, color: 0xe6eedd });
-    const ground = new THREE.Mesh(g, gm); ground.receiveShadow = true; park.add(ground);
-  }
-  // 背景（ぼけた木立と空）
-  {
-    const bt = tex(paintParkBackdrop()); bt.wrapS = THREE.RepeatWrapping;
-    const g = new THREE.CylinderGeometry(36, 36, 34, 48, 1, true);
-    g.translate(0, 34 / 2 - 5, 0);
-    const bm = new THREE.MeshBasicMaterial({ map: bt, side: THREE.BackSide, fog: false, transparent: true, depthWrite: false });
-    const m = new THREE.Mesh(g, bm); m.rotation.y = Math.PI * 0.5; m.renderOrder = -1; park.add(m);
-    park.userData.backdrop = bm;
-  }
-  // ピクニックシート
-  {
-    const gt = paintGingham();
-    const gmap = tex(gt.map, { repeat: true, aniso: maxAniso }), gb = tex(gt.bump, { srgb: false, repeat: true, aniso: maxAniso });
-    const check = 0.62; // 1マス（6.2cm）
-    gmap.repeat.set(11 / (check * 2), 9 / (check * 2)); gb.repeat.copy(gmap.repeat);
-    const g = new THREE.PlaneGeometry(11, 9, 88, 72); g.rotateX(-Math.PI / 2);
-    const p = g.attributes.position, col = new Float32Array(p.count * 3);
-    for (let i = 0; i < p.count; i++) {
-      const X = p.getX(i), Z = p.getZ(i);
-      const ex = sstep(3.2, 5.3, Math.abs(X)), ez = sstep(2.7, 4.3, Math.abs(Z)), e = Math.max(ex, ez);
-      const rum = (fbm(X / 1.3 + 3, Z / 1.3 + 7, 3) - 0.45) * 0.15 * e;
-      const edge = Math.max(sstep(5.25, 5.5, Math.abs(X)), sstep(4.25, 4.5, Math.abs(Z)));
-      let y = 0.038 + 0.004 * (vn(X * 1.3 + 30, Z * 1.3 + 30) - 0.5) + Math.max(-0.02, rum) - 0.03 * edge;
-      // 端の不揃い
-      const jx = (vn(Z * 0.9 + 50, 2) - 0.5) * 0.12 * sstep(5.0, 5.5, Math.abs(X));
-      const jz = (vn(X * 0.9 + 70, 5) - 0.5) * 0.12 * sstep(4.0, 4.5, Math.abs(Z));
-      p.setXYZ(i, X + jx * Math.sign(X), Math.min(0.085, Math.max(0.012, y)), Z + jz * Math.sign(Z));
-      const s = 0.95 + 0.07 * fbm(X / 2 + 11, Z / 2, 2);
-      col[i * 3] = col[i * 3 + 1] = col[i * 3 + 2] = s;
-    }
-    g.setAttribute('color', new THREE.BufferAttribute(col, 3));
-    g.computeVertexNormals();
-    const sm = new THREE.MeshStandardMaterial({ map: gmap, bumpMap: gb, bumpScale: 0.8, roughness: 0.92, vertexColors: true, side: THREE.DoubleSide });
-    const sheet = new THREE.Mesh(g, sm); sheet.receiveShadow = true; sheet.castShadow = false; park.add(sheet);
-  }
-  // 草の房（シートの周り）
-  const tuftMesh = (() => {
-    const tt = tex(paintTuft());
-    const a = new THREE.PlaneGeometry(0.7, 0.55); a.translate(0, 0.275, 0);
-    const b = a.clone(); b.rotateY(Math.PI / 2);
-    const c2 = a.clone(); c2.rotateY(Math.PI / 4);
-    const merged = new THREE.BufferGeometry();
-    const pos = [], uv = [], nor = [];
-    for (const gg of [a, b, c2]) { pos.push(...gg.attributes.position.array); uv.push(...gg.attributes.uv.array); }
-    for (let i = 0; i < pos.length / 3; i++) nor.push(0, 1, 0); // 上向き法線で柔らかく
-    merged.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-    merged.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
-    merged.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
-    const idx = []; for (let k = 0; k < 3; k++) idx.push(k * 4, k * 4 + 2, k * 4 + 1, k * 4 + 2, k * 4 + 3, k * 4 + 1);
-    merged.setIndex(idx);
-    const mat = new THREE.MeshStandardMaterial({ map: tt, alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.9, color: 0xdfe8cf });
-    const N = 300, im = new THREE.InstancedMesh(merged, mat, N), r = rng(123), o = new THREE.Object3D(), cc = new THREE.Color();
-    let k = 0;
-    while (k < N) {
-      const X = (r() - 0.5) * 26, Z = (r() - 0.5) * 22;
-      const inside = Math.abs(X) < 5.6 && Math.abs(Z) < 4.6;
-      if (inside) continue;
-      const dEdge = Math.max(Math.abs(X) - 5.5, Math.abs(Z) - 4.5);
-      if (dEdge > 1.2 && r() < 0.65) continue;
-      o.position.set(X, -0.02, Z); o.rotation.set((r() - 0.5) * 0.25, r() * TAU, (r() - 0.5) * 0.25);
-      const s = 0.35 + r() * 0.45; o.scale.set(s, s * (0.7 + r() * 0.5), s); o.updateMatrix();
-      im.setMatrixAt(k, o.matrix); cc.setHSL(0.2 + r() * 0.06, 0.25, 0.75 + r() * 0.2); im.setColorAt(k, cc); k++;
-    }
-    im.receiveShadow = true; park.add(im); return im;
-  })();
-  // 落ち葉
-  {
-    const r = rng(404), o = new THREE.Object3D();
-    for (let k = 0; k < 3; k++) {
-      const lm = new THREE.MeshStandardMaterial({ map: tex(paintLeaf(k + 1)), alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.8 });
-      const lg = new THREE.PlaneGeometry(0.32, 0.32); lg.rotateX(-Math.PI / 2);
-      const im = new THREE.InstancedMesh(lg, lm, 5);
-      for (let i = 0; i < 5; i++) {
-        let X, Z; do { X = (r() - 0.5) * 22; Z = (r() - 0.5) * 18; } while (Math.abs(X) < 6 && Math.abs(Z) < 5);
-        o.position.set(X, 0.04, Z); o.rotation.set((r() - 0.5) * 0.3, r() * TAU, (r() - 0.5) * 0.3); const s = 0.8 + r() * 0.6; o.scale.set(s, s, s); o.updateMatrix();
-        im.setMatrixAt(i, o.matrix);
+  // 公園は最初の場面（部屋）では見えないので、起動時には作らない。
+  // 遊んでいる間に preparePark() で少しずつ作り、公園を出す直前に足りない分を ensurePark() で仕上げる。
+  let tuftMesh = null, dapple = null, parkLow = false, tPark = 0;
+  const parkTex = [];
+  const ptex = (c, o) => { const t = tex(c, o); parkTex.push(t); return t; };
+  const parkSteps = [
+    () => { // 芝
+      const grassMap = ptex(paintGrass(), { repeat: true, aniso: maxAniso });
+      grassMap.repeat.set(160 / 3.2, 160 / 3.2);
+      {
+        const g = new THREE.PlaneGeometry(160, 160, 64, 64); g.rotateX(-Math.PI / 2);
+        const p = g.attributes.position, col = new Float32Array(p.count * 3);
+        for (let i = 0; i < p.count; i++) {
+          const X = p.getX(i), Z = p.getZ(i);
+          const n = fbm(X / 9 + 40, Z / 9 + 40, 3), m = vn(X / 3 + 9, Z / 3 + 9);
+          const v = 0.8 + 0.35 * n + 0.08 * m;
+          col[i * 3] = v * (1 + 0.12 * (n - 0.5)); col[i * 3 + 1] = v; col[i * 3 + 2] = v * 0.92;
+        }
+        g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+        const gm = new THREE.MeshStandardMaterial({ map: grassMap, bumpMap: grassMap, bumpScale: 1.2, vertexColors: true, roughness: 0.95, color: 0xe6eedd });
+        const ground = new THREE.Mesh(g, gm); ground.receiveShadow = true; park.add(ground);
       }
-      im.receiveShadow = true; park.add(im);
-    }
+    },
+    () => { // 背景（ぼけた木立と空）
+      {
+        const bt = ptex(paintParkBackdrop()); bt.wrapS = THREE.RepeatWrapping;
+        const g = new THREE.CylinderGeometry(36, 36, 34, 48, 1, true);
+        g.translate(0, 34 / 2 - 5, 0);
+        const bm = new THREE.MeshBasicMaterial({ map: bt, side: THREE.BackSide, fog: false, transparent: true, depthWrite: false });
+        const m = new THREE.Mesh(g, bm); m.rotation.y = Math.PI * 0.5; m.renderOrder = -1; park.add(m);
+        park.userData.backdrop = bm;
+      }
+    },
+    () => { // ピクニックシート
+      {
+        const gt = paintGingham();
+        const gmap = ptex(gt.map, { repeat: true, aniso: maxAniso }), gb = ptex(gt.bump, { srgb: false, repeat: true, aniso: maxAniso });
+        const check = 0.62; // 1マス（6.2cm）
+        gmap.repeat.set(11 / (check * 2), 9 / (check * 2)); gb.repeat.copy(gmap.repeat);
+        const g = new THREE.PlaneGeometry(11, 9, 88, 72); g.rotateX(-Math.PI / 2);
+        const p = g.attributes.position, col = new Float32Array(p.count * 3);
+        for (let i = 0; i < p.count; i++) {
+          const X = p.getX(i), Z = p.getZ(i);
+          const ex = sstep(3.2, 5.3, Math.abs(X)), ez = sstep(2.7, 4.3, Math.abs(Z)), e = Math.max(ex, ez);
+          const rum = (fbm(X / 1.3 + 3, Z / 1.3 + 7, 3) - 0.45) * 0.15 * e;
+          const edge = Math.max(sstep(5.25, 5.5, Math.abs(X)), sstep(4.25, 4.5, Math.abs(Z)));
+          let y = 0.038 + 0.004 * (vn(X * 1.3 + 30, Z * 1.3 + 30) - 0.5) + Math.max(-0.02, rum) - 0.03 * edge;
+          // 端の不揃い
+          const jx = (vn(Z * 0.9 + 50, 2) - 0.5) * 0.12 * sstep(5.0, 5.5, Math.abs(X));
+          const jz = (vn(X * 0.9 + 70, 5) - 0.5) * 0.12 * sstep(4.0, 4.5, Math.abs(Z));
+          p.setXYZ(i, X + jx * Math.sign(X), Math.min(0.085, Math.max(0.012, y)), Z + jz * Math.sign(Z));
+          const s = 0.95 + 0.07 * fbm(X / 2 + 11, Z / 2, 2);
+          col[i * 3] = col[i * 3 + 1] = col[i * 3 + 2] = s;
+        }
+        g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+        g.computeVertexNormals();
+        const sm = new THREE.MeshStandardMaterial({ map: gmap, bumpMap: gb, bumpScale: 0.8, roughness: 0.92, vertexColors: true, side: THREE.DoubleSide });
+        const sheet = new THREE.Mesh(g, sm); sheet.receiveShadow = true; sheet.castShadow = false; park.add(sheet);
+      }
+    },
+    () => { // 草の房（シートの周り）
+      tuftMesh = (() => {
+        const tt = ptex(paintTuft());
+        const a = new THREE.PlaneGeometry(0.7, 0.55); a.translate(0, 0.275, 0);
+        const b = a.clone(); b.rotateY(Math.PI / 2);
+        const c2 = a.clone(); c2.rotateY(Math.PI / 4);
+        const merged = new THREE.BufferGeometry();
+        const pos = [], uv = [], nor = [];
+        for (const gg of [a, b, c2]) { pos.push(...gg.attributes.position.array); uv.push(...gg.attributes.uv.array); }
+        for (let i = 0; i < pos.length / 3; i++) nor.push(0, 1, 0); // 上向き法線で柔らかく
+        merged.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+        merged.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+        merged.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+        const idx = []; for (let k = 0; k < 3; k++) idx.push(k * 4, k * 4 + 2, k * 4 + 1, k * 4 + 2, k * 4 + 3, k * 4 + 1);
+        merged.setIndex(idx);
+        const mat = new THREE.MeshStandardMaterial({ map: tt, alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.9, color: 0xdfe8cf });
+        const N = 300, im = new THREE.InstancedMesh(merged, mat, N), r = rng(123), o = new THREE.Object3D(), cc = new THREE.Color();
+        let k = 0;
+        while (k < N) {
+          const X = (r() - 0.5) * 26, Z = (r() - 0.5) * 22;
+          const inside = Math.abs(X) < 5.6 && Math.abs(Z) < 4.6;
+          if (inside) continue;
+          const dEdge = Math.max(Math.abs(X) - 5.5, Math.abs(Z) - 4.5);
+          if (dEdge > 1.2 && r() < 0.65) continue;
+          o.position.set(X, -0.02, Z); o.rotation.set((r() - 0.5) * 0.25, r() * TAU, (r() - 0.5) * 0.25);
+          const s = 0.35 + r() * 0.45; o.scale.set(s, s * (0.7 + r() * 0.5), s); o.updateMatrix();
+          im.setMatrixAt(k, o.matrix); cc.setHSL(0.2 + r() * 0.06, 0.25, 0.75 + r() * 0.2); im.setColorAt(k, cc); k++;
+        }
+        im.receiveShadow = true; park.add(im); return im;
+      })();
+      tuftMesh.visible = !parkLow;
+    },
+    () => { // 落ち葉
+      {
+        const r = rng(404), o = new THREE.Object3D();
+        for (let k = 0; k < 3; k++) {
+          const lm = new THREE.MeshStandardMaterial({ map: ptex(paintLeaf(k + 1)), alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.8 });
+          const lg = new THREE.PlaneGeometry(0.32, 0.32); lg.rotateX(-Math.PI / 2);
+          const im = new THREE.InstancedMesh(lg, lm, 5);
+          for (let i = 0; i < 5; i++) {
+            let X, Z; do { X = (r() - 0.5) * 22; Z = (r() - 0.5) * 18; } while (Math.abs(X) < 6 && Math.abs(Z) < 5);
+            o.position.set(X, 0.04, Z); o.rotation.set((r() - 0.5) * 0.3, r() * TAU, (r() - 0.5) * 0.3); const s = 0.8 + r() * 0.6; o.scale.set(s, s, s); o.updateMatrix();
+            im.setMatrixAt(i, o.matrix);
+          }
+          im.receiveShadow = true; park.add(im);
+        }
+      }
+    },
+    () => { // 木漏れ日（乗算の薄い板）
+      dapple = (() => {
+        const dt = ptex(paintDapple(), { srgb: false, repeat: true });
+        const mat = new THREE.ShaderMaterial({
+          uniforms: { map: { value: dt }, off1: { value: new THREE.Vector2() }, off2: { value: new THREE.Vector2() }, strength: { value: 1 } },
+          vertexShader: `varying vec2 vP; void main(){ vec4 w = modelMatrix*vec4(position,1.0); vP = w.xz; gl_Position = projectionMatrix*viewMatrix*w; }`,
+          fragmentShader: `uniform sampler2D map; uniform vec2 off1, off2; uniform float strength; varying vec2 vP;
+            void main(){
+              float a = texture2D(map, vP/9.0 + off1).r;
+              float b = texture2D(map, vP*vec2(1.0,-1.0)/6.5 + off2).r;
+              float s = mix(1.0, a*mix(1.0,b,0.6), strength);
+              float fade = 1.0 - smoothstep(6.0, 11.0, length(vP*vec2(0.85,1.0) - vec2(-1.0,-1.0)));
+              s = mix(1.0, s, fade);
+              gl_FragColor = vec4(vec3(s), 1.0);
+            }`,
+          transparent: true, depthWrite: false, blending: THREE.MultiplyBlending, premultipliedAlpha: false,
+        });
+        const m = new THREE.Mesh(new THREE.PlaneGeometry(28, 24), mat); m.rotation.x = -Math.PI / 2; m.position.y = 0.095; m.renderOrder = 1;
+        park.add(m); return m;
+      })();
+    },
+  ];
+  let parkStep = 0;
+  // 1段ずつ作る。全部できたら true。
+  function preparePark(steps = 1) {
+    const T1 = performance.now();
+    while (parkStep < parkSteps.length && steps-- > 0) parkSteps[parkStep++]();
+    tPark += performance.now() - T1;
+    if (parkStep >= parkSteps.length && !api.parkReady) { api.parkReady = true; api.timings.park = tPark; if (current === 'park') apply(); }
+    return api.parkReady;
   }
-  // 木漏れ日（乗算の薄い板）
-  const dapple = (() => {
-    const dt = tex(paintDapple(), { srgb: false, repeat: true });
-    const mat = new THREE.ShaderMaterial({
-      uniforms: { map: { value: dt }, off1: { value: new THREE.Vector2() }, off2: { value: new THREE.Vector2() }, strength: { value: 1 } },
-      vertexShader: `varying vec2 vP; void main(){ vec4 w = modelMatrix*vec4(position,1.0); vP = w.xz; gl_Position = projectionMatrix*viewMatrix*w; }`,
-      fragmentShader: `uniform sampler2D map; uniform vec2 off1, off2; uniform float strength; varying vec2 vP;
-        void main(){
-          float a = texture2D(map, vP/9.0 + off1).r;
-          float b = texture2D(map, vP*vec2(1.0,-1.0)/6.5 + off2).r;
-          float s = mix(1.0, a*mix(1.0,b,0.6), strength);
-          float fade = 1.0 - smoothstep(6.0, 11.0, length(vP*vec2(0.85,1.0) - vec2(-1.0,-1.0)));
-          s = mix(1.0, s, fade);
-          gl_FragColor = vec4(vec3(s), 1.0);
-        }`,
-      transparent: true, depthWrite: false, blending: THREE.MultiplyBlending, premultipliedAlpha: false,
-    });
-    const m = new THREE.Mesh(new THREE.PlaneGeometry(28, 24), mat); m.rotation.x = -Math.PI / 2; m.position.y = 0.095; m.renderOrder = 1;
-    park.add(m); return m;
-  })();
-  const tPark = performance.now() - T1;
+  function ensurePark() { return preparePark(parkSteps.length); }
 
   // ---- 切り替え ----
   const C1 = new THREE.Color(), C2 = new THREE.Color();
@@ -670,11 +692,12 @@ export function createWorld(scene, renderer) {
     scene.environmentIntensity = P.env + (E.env - P.env) * k;
     scene.fog.color.copy(lc(P.fog, E.fog)); scene.fog.near = P.fogNear; scene.fog.far = P.fogFar;
     if (park.userData.backdrop) park.userData.backdrop.color.copy(C1.set(0xffffff).lerp(C2.set(0xffd6a8), k * 0.8));
-    dapple.material.uniforms.strength.value = 1 - 0.35 * k;
+    if (dapple) dapple.material.uniforms.strength.value = 1 - 0.35 * k;
     sun.shadow.needsUpdate = true;
   }
   function show(name) {
     current = name === 'park' ? 'park' : 'room';
+    if (current === 'park') ensurePark();
     room.visible = current === 'room'; park.visible = current === 'park';
     api.current = current;
     apply();
@@ -686,7 +709,8 @@ export function createWorld(scene, renderer) {
       sun.shadow.mapSize.set(s, s);
       if (sun.shadow.map) { sun.shadow.map.dispose(); sun.shadow.map = null; }
     }
-    tuftMesh.visible = !low;
+    parkLow = low;
+    if (tuftMesh) tuftMesh.visible = !low;
     curtain.low = low;
   }
   let acc = 0;
@@ -694,13 +718,14 @@ export function createWorld(scene, renderer) {
     if (current === 'room') {
       acc += dt;
       if (!curtain.low || acc > 0.1) { curtain.update(t); acc = 0; }
-    } else {
+    } else if (dapple) {
       const u = dapple.material.uniforms;
       u.off1.value.set(t * 0.006 + Math.sin(t * 0.21) * 0.006, t * 0.003 + Math.sin(t * 0.17 + 1) * 0.006);
       u.off2.value.set(-t * 0.004 + Math.sin(t * 0.33) * 0.004, t * 0.005);
     }
   }
-  const api = { room, park, show, current, sun, hemi, fill, setLow, setEvening, pegs, update, timings: { room: tRoom, park: tPark } };
+  const api = { room, park, show, current, sun, hemi, fill, setLow, setEvening, pegs, update, timings: { room: tRoom, park: 0 },
+    parkReady: false, preparePark, ensurePark, parkTextures: parkTex };
   show('room');
   return api;
 }

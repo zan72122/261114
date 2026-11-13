@@ -1394,10 +1394,34 @@ export function startGame() {
   // ====================================================================== start
   buildPegBags(false);
   applyStage(S.stage, { restore: true });
-  // 今見えていないほう（部屋 / 公園）も含め、全部のシェーダーを読み込み中に作っておく（場面切り替えのカクつき防止）。
-  // 部屋と公園は光の構成を揃えてあるので、1回で両方の場面に効く。
+  // 最初の場面に要るシェーダーだけ先に作る（公園はまだ作っていないので、部屋の分だけで済む）。
   try { if (engine.renderer.compile) engine.renderer.compile(scene, camera); } catch (_) { /* */ }
   engine.start();
+  warmPark();
+
+  // ---- 裏での読み込み: 公園を遊んでいる間に少しずつ作り、絵とシェーダーも先に GPU へ送っておく
+  // （公園へ切り替える瞬間の止まりを防ぐ）。指で動かしている最中とタブが裏のときは待つ。
+  // 公園が先に要るときは world.show('park') がその場で仕上げるので、ここが間に合わなくても困らない。
+  function warmPark() {
+    const later = (fn, ms) => setTimeout(() => { try { fn(); } catch (err) { try { console.error(err); } catch (_) { /* */ } } }, ms);
+    const idle = () => !document.hidden && !drag;
+    const r = engine.renderer;
+    let tex = null;
+    function step() {
+      if (!idle()) { later(step, 400); return; }
+      if (!world.parkReady) { world.preparePark(1); later(step, 150); return; }
+      if (!tex) tex = world.parkTextures.slice();
+      if (world.current !== 'park' && tex.length) {
+        const t = tex.shift();
+        if (r.initTexture) r.initTexture(t);
+        later(step, 100); return;
+      }
+      if (world.current === 'park' || !r.compileAsync) return;
+      // 部屋と公園は光の構成を揃えてあるので、部屋を見せたまま公園の分を作っておける。
+      r.compileAsync(world.park, camera, scene).catch(() => { /* */ });
+    }
+    later(step, 1200);
+  }
 
   if (__DEV__) {
     window.__g = {
