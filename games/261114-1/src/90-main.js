@@ -24,6 +24,9 @@
     if (!ok) { fallback(); return; }
 
     tryDo('state', function () { G.state.load(); });
+    // ここから最初の絵までの間に作る重い手続きテクスチャは粗い版で出し、本番は遊びながら裏で描く（G.util.bg）
+    var bg = G.util && G.util.bg;
+    if (bg) bg.draft = true;
     tryDo('world', function () { if (G.world && G.world.build) G.world.build(G.core.scene, G.core.renderer); });
 
     var scene = G.core.scene;
@@ -53,16 +56,26 @@
       else { tryDo('reset', function () { G.state.reset(); }); first = 'wrap'; }
     }
 
+    if (bg) bg.draft = false;
+
     G.core.start();
     tryDo('go', function () { G.flow.go(first); });
     G.core.fade(0, 0.8);
 
     // 最初の絵が出たあと、まだ見えていない道具（ほかの場面の物）のシェーダーも先にコンパイルしておく。
-    // 場面が変わった瞬間のコンパイルによる引っかかりを防ぐ。
+    // 場面が変わった瞬間のコンパイルによる引っかかりを防ぐ。使えるときは並列コンパイル（compileAsync）で
+    // メインの処理を止めずに進める。
     var waitF = 3;
     (function pre() {
       if (--waitF > 0) { requestAnimationFrame(pre); return; }
-      tryDo('precompile', function () { var c = G.core; if (c.renderer && !c.lost) c.renderer.compile(c.scene, c.camera); });
+      tryDo('precompile', function () {
+        var c = G.core, r = c.renderer;
+        if (!r || c.lost) return;
+        if (typeof r.compileAsync === 'function') {
+          var p = r.compileAsync(c.scene, c.camera);
+          if (p && p.catch) p.catch(function (e) { err('precompile', e); });
+        } else r.compile(c.scene, c.camera);
+      });
     })();
   }
 

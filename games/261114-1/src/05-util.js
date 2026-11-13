@@ -55,6 +55,73 @@
     c.width = w; c.height = h || w;
     return c;
   };
+
+  /* ───── 裏の読み込み（起動を速くする） ─────
+     起動中（BG.draft=true）に作る重い手続きテクスチャは、まず縦横 1/2〜1/4 の粗い版を同じ大きさの Canvas に
+     引き伸ばして出し、本番の解像度は遊んでいる間に少しずつ（1フレーム数ミリ秒まで）描いて同じ Canvas に書き戻す。
+     Canvas の大きさは変えないので、それを使うテクスチャは needsUpdate だけで差し替わる。 */
+  var BG = (U.bg = { jobs: [], draft: false, busy: false, deadline: 0 });
+  function now() { return (window.performance && performance.now) ? performance.now() : Date.now(); }
+  BG.add = function (it) { BG.jobs.push(it); BG.busy = true; };
+  BG.over = function () { return now() >= BG.deadline; };
+  /* ms ミリ秒まで仕事を進める。残りがあれば true */
+  BG.run = function (ms) {
+    BG.deadline = now() + ms;
+    while (BG.jobs.length) {
+      var it = BG.jobs[0], r;
+      try { r = it.next(); } catch (e) { r = { done: true }; try { console.error('[bg]', e); } catch (_) { /* noop */ } }
+      if (r.done) BG.jobs.shift();
+      if (BG.over()) break;
+    }
+    BG.busy = BG.jobs.length > 0;
+    return BG.busy;
+  };
+  /* 粗い版の間引き幅（1=そのまま）。短い辺が 128px を下回らない範囲で 2 か 4 */
+  U.draftStep = function (w, h) {
+    if (!BG.draft) return 1;
+    var m = Math.min(w, h);
+    return m >= 512 ? 4 : m >= 256 ? 2 : 1;
+  };
+  /* Canvas を使うテクスチャに描き直しを知らせる */
+  U.touchCanvas = function (c) {
+    var ts = c && c._texs;
+    if (ts) for (var i = 0; i < ts.length; i++) ts[i].needsUpdate = true;
+  };
+  function stretchInto(dst, src) {
+    var x = dst.getContext('2d');
+    x.imageSmoothingEnabled = true;
+    try { x.imageSmoothingQuality = 'high'; } catch (_) { /* noop */ }
+    x.drawImage(src, 0, 0, dst.width, dst.height);
+  }
+  /* 画素ごとに描く Canvas を「今すぐ粗く＋裏で本番」で作る共通部。
+     rows(datas, bw, y0, y1, d): 幅 bw の画像の y0..y1 行を、元の画素 (x*d, y*d) の値で埋める */
+  U.progressivePixels = function (w, h, n, rows, keep) {
+    var outs = [], i;
+    for (i = 0; i < n; i++) outs.push(U.canvas(w, h));
+    var d = U.draftStep(w, h);
+    if (d <= 1) {
+      var ds = outs.map(function (c) { return c.getContext('2d').createImageData(w, h); });
+      rows(ds.map(function (im) { return im.data; }), w, 0, h, 1);
+      for (i = 0; i < n; i++) outs[i].getContext('2d').putImageData(ds[i], 0, 0);
+      if (keep >= 0) outs[keep]._px = { d: ds[keep].data, w: w, h: h };
+      return outs;
+    }
+    var sw = Math.ceil(w / d), sh = Math.ceil(h / d);
+    var smalls = [], sd = [];
+    for (i = 0; i < n; i++) { smalls.push(U.canvas(sw, sh)); sd.push(smalls[i].getContext('2d').createImageData(sw, sh)); }
+    rows(sd.map(function (im) { return im.data; }), sw, 0, sh, d);
+    for (i = 0; i < n; i++) { smalls[i].getContext('2d').putImageData(sd[i], 0, 0); stretchInto(outs[i], smalls[i]); }
+    if (keep >= 0) outs[keep]._px = { d: sd[keep].data, w: sw, h: sh };
+    BG.add((function* () {
+      var fd = outs.map(function (c) { return c.getContext('2d').createImageData(w, h); });
+      var arr = fd.map(function (im) { return im.data; });
+      for (var y = 0; y < h; y++) { rows(arr, w, y, y + 1, 1); if (BG.over()) yield; }
+      for (var k = 0; k < n; k++) { outs[k].getContext('2d').putImageData(fd[k], 0, 0); U.touchCanvas(outs[k]); }
+      if (keep >= 0) outs[keep]._px = { d: fd[keep].data, w: w, h: h };
+    })());
+    return outs;
+  };
+
   /* Canvas → THREE.CanvasTexture。opts: {srgb:true(色), repeat:[u,v], aniso:4} */
   U.canvasTex = function (canvas, opts) {
     opts = opts || {};
@@ -66,37 +133,76 @@
     }
     t.anisotropy = opts.aniso || 4;
     t.needsUpdate = true;
+    (canvas._texs || (canvas._texs = [])).push(t);
     return t;
   };
   /* ピクセル関数から Canvas を作る: fn(u,v,x,y) → [r,g,b,a] (0..255) */
   U.pixelCanvas = function (w, h, fn) {
-    var c = U.canvas(w, h), ctx = c.getContext('2d');
-    var img = ctx.createImageData(w, h), d = img.data, p = 0;
-    for (var y = 0; y < h; y++) {
-      for (var x = 0; x < w; x++) {
-        var px = fn(x / w, y / h, x, y);
-        d[p++] = px[0]; d[p++] = px[1]; d[p++] = px[2]; d[p++] = px.length > 3 ? px[3] : 255;
+    return U.progressivePixels(w, h, 1, function (D, bw, y0, y1, d) {
+      var dd = D[0];
+      for (var y = y0; y < y1; y++) {
+        var Y = Math.min(h - 1, y * d), p = y * bw * 4;
+        for (var x = 0; x < bw; x++) {
+          var X = Math.min(w - 1, x * d);
+          var px = fn(X / w, Y / h, X, Y);
+          dd[p++] = px[0]; dd[p++] = px[1]; dd[p++] = px[2]; dd[p++] = px.length > 3 ? px[3] : 255;
+        }
       }
-    }
-    ctx.putImageData(img, 0, 0);
-    return c;
+    }, 0)[0];
   };
-  /* 高さ Canvas(グレースケール) → 法線マップ Canvas。strength は凹凸の強さ */
-  U.normalFromHeight = function (heightCanvas, strength) {
-    var w = heightCanvas.width, h = heightCanvas.height;
-    var src = heightCanvas.getContext('2d').getImageData(0, 0, w, h).data;
-    var out = U.canvas(w, h), octx = out.getContext('2d');
-    var img = octx.createImageData(w, h), d = img.data;
-    strength = strength || 2;
+  function normalRows(src, w, h, strength, d, y0, y1) {
     function H(x, y) { x = (x + w) % w; y = (y + h) % h; return src[(y * w + x) * 4] / 255; }
-    for (var y = 0; y < h; y++) {
+    for (var y = y0; y < y1; y++) {
       for (var x = 0; x < w; x++) {
         var dx = (H(x + 1, y) - H(x - 1, y)) * strength, dy = (H(x, y + 1) - H(x, y - 1)) * strength;
         var l = 1 / Math.sqrt(dx * dx + dy * dy + 1), p = (y * w + x) * 4;
         d[p] = (-dx * l * 0.5 + 0.5) * 255; d[p + 1] = (dy * l * 0.5 + 0.5) * 255; d[p + 2] = (l * 0.5 + 0.5) * 255; d[p + 3] = 255;
       }
     }
-    octx.putImageData(img, 0, 0);
+  }
+  /* Canvas の画素を読む。作った時の画素が残っていればそれを使う（GPU からの読み戻し getImageData は遅い） */
+  function pixelsOf(c) {
+    var px = c._px;
+    if (px && px.w === c.width && px.h === c.height) return px.d;
+    return c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+  }
+  /* 高さ Canvas(グレースケール) → 法線マップ Canvas。strength は凹凸の強さ。
+     起動中は粗い版を返し、本番は裏で（高さ Canvas の本番が描けた後に）書き戻す。exact=true なら必ず今すぐ本番 */
+  U.normalFromHeight = function (heightCanvas, strength, exact) {
+    var w = heightCanvas.width, h = heightCanvas.height;
+    var out = U.canvas(w, h), octx = out.getContext('2d');
+    strength = strength || 2;
+    var d = exact ? 1 : U.draftStep(w, h);
+    if (d <= 1) {
+      var src = pixelsOf(heightCanvas);
+      heightCanvas._px = null;
+      var img = octx.createImageData(w, h);
+      normalRows(src, w, h, strength, img.data, 0, h);
+      octx.putImageData(img, 0, 0);
+      return out;
+    }
+    // 粗い版: 作った時の粗い画素があればそれを、なければ縮めて読む
+    var px = heightCanvas._px, sw, sh, ssrc;
+    if (px && px.w < w) { sw = px.w; sh = px.h; ssrc = px.d; }
+    else {
+      sw = Math.ceil(w / d); sh = Math.ceil(h / d);
+      var tc = U.canvas(sw, sh), tx = tc.getContext('2d', { willReadFrequently: true });
+      tx.drawImage(heightCanvas, 0, 0, sw, sh);
+      ssrc = tx.getImageData(0, 0, sw, sh).data;
+    }
+    var sc = U.canvas(sw, sh), sx = sc.getContext('2d'), simg = sx.createImageData(sw, sh);
+    normalRows(ssrc, sw, sh, strength * sw / w, simg.data, 0, sh);
+    sx.putImageData(simg, 0, 0);
+    stretchInto(out, sc);
+    // 高さ Canvas の本番は先に積まれているので、順に進めればこの時点で描けている
+    BG.add((function* () {
+      var src2 = pixelsOf(heightCanvas);
+      heightCanvas._px = null;
+      var img2 = octx.createImageData(w, h);
+      for (var y = 0; y < h; y += 8) { normalRows(src2, w, h, strength, img2.data, y, Math.min(h, y + 8)); if (BG.over()) yield; }
+      octx.putImageData(img2, 0, 0);
+      U.touchCanvas(out);
+    })());
     return out;
   };
 

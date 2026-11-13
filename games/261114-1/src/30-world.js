@@ -34,26 +34,26 @@
   var TX = {};
   function cached(key, fn) { return TX[key] || (TX[key] = fn()); }
 
-  /* fn(u,v,x,y,o): o=[r,g,b, height, rough, alpha]（0..1） */
+  /* fn(u,v,x,y,o): o=[r,g,b, height, rough, alpha]（0..1）。
+     起動中は粗い版をすぐ返し、本番の解像度は裏で描いて同じ Canvas に書き戻す（U.progressivePixels） */
   function paint(w, h, fn, wantH, wantR) {
-    var cc = U.canvas(w, h), cx = cc.getContext('2d'), ci = cx.createImageData(w, h), cd = ci.data;
-    var hc, hx, hi, hd, rc, rx, ri, rd;
-    if (wantH) { hc = U.canvas(w, h); hx = hc.getContext('2d'); hi = hx.createImageData(w, h); hd = hi.data; }
-    if (wantR) { rc = U.canvas(w, h); rx = rc.getContext('2d'); ri = rx.createImageData(w, h); rd = ri.data; }
-    var o = [0, 0, 0, 0.5, 0.5, 1], p = 0;
-    for (var y = 0; y < h; y++) {
-      for (var x = 0; x < w; x++, p += 4) {
-        o[3] = 0.5; o[4] = 0.5; o[5] = 1;
-        fn(x / w, y / h, x, y, o);
-        cd[p] = o[0] * 255; cd[p + 1] = o[1] * 255; cd[p + 2] = o[2] * 255; cd[p + 3] = o[5] * 255;
-        if (hd) { var hv = o[3] * 255; hd[p] = hd[p + 1] = hd[p + 2] = hv; hd[p + 3] = 255; }
-        if (rd) { var rv = o[4] * 255; rd[p] = rd[p + 1] = rd[p + 2] = rv; rd[p + 3] = 255; }
+    var n = 1 + (wantH ? 1 : 0) + (wantR ? 1 : 0), iH = wantH ? 1 : -1, iR = wantR ? (wantH ? 2 : 1) : -1;
+    var o = [0, 0, 0, 0.5, 0.5, 1];
+    var cs = U.progressivePixels(w, h, n, function (D, bw, y0, y1, d) {
+      var cd = D[0], hd = iH > 0 ? D[iH] : null, rd = iR > 0 ? D[iR] : null;
+      for (var y = y0; y < y1; y++) {
+        var Y = Math.min(h - 1, y * d), p = y * bw * 4;
+        for (var x = 0; x < bw; x++, p += 4) {
+          var X = Math.min(w - 1, x * d);
+          o[3] = 0.5; o[4] = 0.5; o[5] = 1;
+          fn(X / w, Y / h, X, Y, o);
+          cd[p] = o[0] * 255; cd[p + 1] = o[1] * 255; cd[p + 2] = o[2] * 255; cd[p + 3] = o[5] * 255;
+          if (hd) { var hv = o[3] * 255; hd[p] = hd[p + 1] = hd[p + 2] = hv; hd[p + 3] = 255; }
+          if (rd) { var rv = o[4] * 255; rd[p] = rd[p + 1] = rd[p + 2] = rv; rd[p + 3] = 255; }
+        }
       }
-    }
-    cx.putImageData(ci, 0, 0);
-    if (hd) hx.putImageData(hi, 0, 0);
-    if (rd) rx.putImageData(ri, 0, 0);
-    return { color: cc, height: hc, rough: rc };
+    }, iH);
+    return { color: cs[0], height: iH > 0 ? cs[iH] : undefined, rough: iR > 0 ? cs[iR] : undefined };
   }
   function tex(canvas, rep, srgb) {
     return U.canvasTex(canvas, { srgb: srgb !== false, repeat: rep || [1, 1], aniso: 8 });

@@ -148,16 +148,37 @@
       if (TEX.cookedMat) return TEX.cookedMat;
       var t = fillingTextures();
       var src = t.fillCol.image, S = src.width;
-      var out = U.canvas(S), ctx = out.getContext('2d');
-      ctx.drawImage(src, 0, 0);
-      var img = ctx.getImageData(0, 0, S, S), d = img.data;
-      for (var i = 0; i < d.length; i += 4) {
-        var r = d[i], g = d[i + 1], b = d[i + 2];
-        if (g > r * 0.9) { d[i] = r * 0.5 + 14; d[i + 1] = g * 0.72 + 22; d[i + 2] = b * 0.35 + 6; continue; } // ニラの緑ははっきり残す
-        var l = (r * 0.5 + g * 0.35 + b * 0.15);
-        d[i] = l * 0.78 + 24; d[i + 1] = l * 0.60 + 14; d[i + 2] = l * 0.44 + 8; // 火の通った肉の茶色（皮の白とはっきり違う）
+      var out = U.canvas(S);
+      function cook(c) {
+        var ctx = c.getContext('2d', { willReadFrequently: true }), W = c.width, H = c.height;
+        ctx.imageSmoothingEnabled = true;
+        ctx.drawImage(src, 0, 0, W, H);
+        var img = ctx.getImageData(0, 0, W, H), d = img.data;
+        return { ctx: ctx, img: img, d: d };
       }
-      ctx.putImageData(img, 0, 0);
+      function tone(d, i0, i1) {
+        for (var i = i0; i < i1; i += 4) {
+          var r = d[i], g = d[i + 1], b = d[i + 2];
+          if (g > r * 0.9) { d[i] = r * 0.5 + 14; d[i + 1] = g * 0.72 + 22; d[i + 2] = b * 0.35 + 6; continue; } // ニラの緑ははっきり残す
+          var l = (r * 0.5 + g * 0.35 + b * 0.15);
+          d[i] = l * 0.78 + 24; d[i + 1] = l * 0.60 + 14; d[i + 2] = l * 0.44 + 8; // 火の通った肉の茶色（皮の白とはっきり違う）
+        }
+      }
+      var dstep = U.draftStep(S, S);
+      if (dstep > 1) {
+        // 起動中は粗い版（断面が見えるのは食べる場面なので、本番は裏で）
+        var sm = U.canvas(Math.ceil(S / dstep)), sk = cook(sm);
+        tone(sk.d, 0, sk.d.length); sk.ctx.putImageData(sk.img, 0, 0);
+        out.getContext('2d').drawImage(sm, 0, 0, S, S);
+        U.bg.add((function* () {
+          var fk = cook(U.canvas(S)), step = S * 4 * 16;
+          for (var i = 0; i < fk.d.length; i += step) { tone(fk.d, i, Math.min(fk.d.length, i + step)); if (U.bg.over()) yield; }
+          out.getContext('2d').putImageData(fk.img, 0, 0);
+          U.touchCanvas(out);
+        })());
+      } else {
+        var k = cook(out); tone(k.d, 0, k.d.length); k.ctx.putImageData(k.img, 0, 0);
+      }
       TEX.cookedMat = new THREE.MeshPhysicalMaterial({
         map: U.canvasTex(out, { repeat: [1, 1] }), normalMap: t.fillNrm, normalScale: new THREE.Vector2(1.2, 1.2),
         roughness: 0.5, clearcoat: 0.4, clearcoatRoughness: 0.3
@@ -1104,7 +1125,8 @@
     }
     this.dataTex.needsUpdate = true;
     hc.putImageData(himg, 0, 0);
-    var nc = U.normalFromHeight(this._nCanvas, 2.0);
+    this._nCanvas._px = { d: hd, w: S, h: S }; // 画素は手元にあるので読み戻さない
+    var nc = U.normalFromHeight(this._nCanvas, 2.0, true);
     this._nCanvas.getContext('2d').drawImage(nc, 0, 0);
     this.normalTex.needsUpdate = true;
   };

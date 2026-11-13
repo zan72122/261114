@@ -33,7 +33,7 @@
   var prLevels = [1], prLevel = 0, frameEma = 16.7, slowT = 0, fastT = 0, graceT = 1.5;
   // 画素の予算: iPad など大きな画面で devicePixelRatio をそのまま使うと塗りが重すぎるため、
   // 最初は「幅×高さ×pr² ≦ PX_BUDGET」になる段から始め、余裕が続けば上げる。
-  var PX_BUDGET = 2.8e6, prCeil = 0, upAt = -1e9, nowT = 0;
+  var PX_BUDGET = 2.8e6, prCeil = 0, upAt = -1e9, nowT = 0, bgBusy = false;
 
   C.init = function (canvas) {
     try {
@@ -144,6 +144,8 @@
     // 1回だけの長い停止（コンパイル・GC）で平均が跳ねないよう上限を切る
     frameEma += (Math.min(rawMs, 60) - frameEma) * 0.08;
     if (graceT > 0) { graceT -= dt; slowT = fastT = 0; return; }
+    // 裏の読み込み（本番テクスチャの描画）が動いている間は測らない（その分の重さで解像度を下げないように）
+    if (bgBusy) { slowT = fastT = 0; return; }
     // 約48fps を割る状態が続けば解像度を1段下げ、60fps 近くが長く続けば1段上げる
     if (frameEma > 21) { slowT += dt; fastT = 0; } else if (frameEma < 17.6) { fastT += dt; slowT = 0; } else { slowT = fastT = 0; }
     if (slowT > 1.2 && prLevel < prLevels.length - 1) {
@@ -243,6 +245,12 @@
       try { shadowSync(); } catch (e) { r.shadowMap.needsUpdate = true; if (!C._sErr) { C._sErr = 1; logErr('shadowSync', e); } }
       try { r.render(C.scene, C.camera); } catch (e) { if (!C._rErr) { C._rErr = 1; logErr('render', e); } }
     }
+    // 描き終えた後の残り時間で、裏の読み込みを少しずつ進める（最初の暗転明けは少し多めに）
+    var bg = U.bg;
+    if (bg && bg.busy) {
+      bgBusy = true;
+      try { bg.run(C.time < 1.2 ? 9 : 5); } catch (e) { logErr('bg', e); }
+    } else if (bgBusy) { bgBusy = false; graceT = Math.max(graceT, 1); }
   }
 
   function startLoop() {

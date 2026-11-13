@@ -87,6 +87,73 @@ function(t,e){"object"==typeof exports&&"undefined"!=typeof module?e(exports):"f
     c.width = w; c.height = h || w;
     return c;
   };
+
+  /* ───── 裏の読み込み（起動を速くする） ─────
+     起動中（BG.draft=true）に作る重い手続きテクスチャは、まず縦横 1/2〜1/4 の粗い版を同じ大きさの Canvas に
+     引き伸ばして出し、本番の解像度は遊んでいる間に少しずつ（1フレーム数ミリ秒まで）描いて同じ Canvas に書き戻す。
+     Canvas の大きさは変えないので、それを使うテクスチャは needsUpdate だけで差し替わる。 */
+  var BG = (U.bg = { jobs: [], draft: false, busy: false, deadline: 0 });
+  function now() { return (window.performance && performance.now) ? performance.now() : Date.now(); }
+  BG.add = function (it) { BG.jobs.push(it); BG.busy = true; };
+  BG.over = function () { return now() >= BG.deadline; };
+  /* ms ミリ秒まで仕事を進める。残りがあれば true */
+  BG.run = function (ms) {
+    BG.deadline = now() + ms;
+    while (BG.jobs.length) {
+      var it = BG.jobs[0], r;
+      try { r = it.next(); } catch (e) { r = { done: true }; try { console.error('[bg]', e); } catch (_) { /* noop */ } }
+      if (r.done) BG.jobs.shift();
+      if (BG.over()) break;
+    }
+    BG.busy = BG.jobs.length > 0;
+    return BG.busy;
+  };
+  /* 粗い版の間引き幅（1=そのまま）。短い辺が 128px を下回らない範囲で 2 か 4 */
+  U.draftStep = function (w, h) {
+    if (!BG.draft) return 1;
+    var m = Math.min(w, h);
+    return m >= 512 ? 4 : m >= 256 ? 2 : 1;
+  };
+  /* Canvas を使うテクスチャに描き直しを知らせる */
+  U.touchCanvas = function (c) {
+    var ts = c && c._texs;
+    if (ts) for (var i = 0; i < ts.length; i++) ts[i].needsUpdate = true;
+  };
+  function stretchInto(dst, src) {
+    var x = dst.getContext('2d');
+    x.imageSmoothingEnabled = true;
+    try { x.imageSmoothingQuality = 'high'; } catch (_) { /* noop */ }
+    x.drawImage(src, 0, 0, dst.width, dst.height);
+  }
+  /* 画素ごとに描く Canvas を「今すぐ粗く＋裏で本番」で作る共通部。
+     rows(datas, bw, y0, y1, d): 幅 bw の画像の y0..y1 行を、元の画素 (x*d, y*d) の値で埋める */
+  U.progressivePixels = function (w, h, n, rows, keep) {
+    var outs = [], i;
+    for (i = 0; i < n; i++) outs.push(U.canvas(w, h));
+    var d = U.draftStep(w, h);
+    if (d <= 1) {
+      var ds = outs.map(function (c) { return c.getContext('2d').createImageData(w, h); });
+      rows(ds.map(function (im) { return im.data; }), w, 0, h, 1);
+      for (i = 0; i < n; i++) outs[i].getContext('2d').putImageData(ds[i], 0, 0);
+      if (keep >= 0) outs[keep]._px = { d: ds[keep].data, w: w, h: h };
+      return outs;
+    }
+    var sw = Math.ceil(w / d), sh = Math.ceil(h / d);
+    var smalls = [], sd = [];
+    for (i = 0; i < n; i++) { smalls.push(U.canvas(sw, sh)); sd.push(smalls[i].getContext('2d').createImageData(sw, sh)); }
+    rows(sd.map(function (im) { return im.data; }), sw, 0, sh, d);
+    for (i = 0; i < n; i++) { smalls[i].getContext('2d').putImageData(sd[i], 0, 0); stretchInto(outs[i], smalls[i]); }
+    if (keep >= 0) outs[keep]._px = { d: sd[keep].data, w: sw, h: sh };
+    BG.add((function* () {
+      var fd = outs.map(function (c) { return c.getContext('2d').createImageData(w, h); });
+      var arr = fd.map(function (im) { return im.data; });
+      for (var y = 0; y < h; y++) { rows(arr, w, y, y + 1, 1); if (BG.over()) yield; }
+      for (var k = 0; k < n; k++) { outs[k].getContext('2d').putImageData(fd[k], 0, 0); U.touchCanvas(outs[k]); }
+      if (keep >= 0) outs[keep]._px = { d: fd[keep].data, w: w, h: h };
+    })());
+    return outs;
+  };
+
   /* Canvas → THREE.CanvasTexture。opts: {srgb:true(色), repeat:[u,v], aniso:4} */
   U.canvasTex = function (canvas, opts) {
     opts = opts || {};
@@ -98,37 +165,76 @@ function(t,e){"object"==typeof exports&&"undefined"!=typeof module?e(exports):"f
     }
     t.anisotropy = opts.aniso || 4;
     t.needsUpdate = true;
+    (canvas._texs || (canvas._texs = [])).push(t);
     return t;
   };
   /* ピクセル関数から Canvas を作る: fn(u,v,x,y) → [r,g,b,a] (0..255) */
   U.pixelCanvas = function (w, h, fn) {
-    var c = U.canvas(w, h), ctx = c.getContext('2d');
-    var img = ctx.createImageData(w, h), d = img.data, p = 0;
-    for (var y = 0; y < h; y++) {
-      for (var x = 0; x < w; x++) {
-        var px = fn(x / w, y / h, x, y);
-        d[p++] = px[0]; d[p++] = px[1]; d[p++] = px[2]; d[p++] = px.length > 3 ? px[3] : 255;
+    return U.progressivePixels(w, h, 1, function (D, bw, y0, y1, d) {
+      var dd = D[0];
+      for (var y = y0; y < y1; y++) {
+        var Y = Math.min(h - 1, y * d), p = y * bw * 4;
+        for (var x = 0; x < bw; x++) {
+          var X = Math.min(w - 1, x * d);
+          var px = fn(X / w, Y / h, X, Y);
+          dd[p++] = px[0]; dd[p++] = px[1]; dd[p++] = px[2]; dd[p++] = px.length > 3 ? px[3] : 255;
+        }
       }
-    }
-    ctx.putImageData(img, 0, 0);
-    return c;
+    }, 0)[0];
   };
-  /* 高さ Canvas(グレースケール) → 法線マップ Canvas。strength は凹凸の強さ */
-  U.normalFromHeight = function (heightCanvas, strength) {
-    var w = heightCanvas.width, h = heightCanvas.height;
-    var src = heightCanvas.getContext('2d').getImageData(0, 0, w, h).data;
-    var out = U.canvas(w, h), octx = out.getContext('2d');
-    var img = octx.createImageData(w, h), d = img.data;
-    strength = strength || 2;
+  function normalRows(src, w, h, strength, d, y0, y1) {
     function H(x, y) { x = (x + w) % w; y = (y + h) % h; return src[(y * w + x) * 4] / 255; }
-    for (var y = 0; y < h; y++) {
+    for (var y = y0; y < y1; y++) {
       for (var x = 0; x < w; x++) {
         var dx = (H(x + 1, y) - H(x - 1, y)) * strength, dy = (H(x, y + 1) - H(x, y - 1)) * strength;
         var l = 1 / Math.sqrt(dx * dx + dy * dy + 1), p = (y * w + x) * 4;
         d[p] = (-dx * l * 0.5 + 0.5) * 255; d[p + 1] = (dy * l * 0.5 + 0.5) * 255; d[p + 2] = (l * 0.5 + 0.5) * 255; d[p + 3] = 255;
       }
     }
-    octx.putImageData(img, 0, 0);
+  }
+  /* Canvas の画素を読む。作った時の画素が残っていればそれを使う（GPU からの読み戻し getImageData は遅い） */
+  function pixelsOf(c) {
+    var px = c._px;
+    if (px && px.w === c.width && px.h === c.height) return px.d;
+    return c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+  }
+  /* 高さ Canvas(グレースケール) → 法線マップ Canvas。strength は凹凸の強さ。
+     起動中は粗い版を返し、本番は裏で（高さ Canvas の本番が描けた後に）書き戻す。exact=true なら必ず今すぐ本番 */
+  U.normalFromHeight = function (heightCanvas, strength, exact) {
+    var w = heightCanvas.width, h = heightCanvas.height;
+    var out = U.canvas(w, h), octx = out.getContext('2d');
+    strength = strength || 2;
+    var d = exact ? 1 : U.draftStep(w, h);
+    if (d <= 1) {
+      var src = pixelsOf(heightCanvas);
+      heightCanvas._px = null;
+      var img = octx.createImageData(w, h);
+      normalRows(src, w, h, strength, img.data, 0, h);
+      octx.putImageData(img, 0, 0);
+      return out;
+    }
+    // 粗い版: 作った時の粗い画素があればそれを、なければ縮めて読む
+    var px = heightCanvas._px, sw, sh, ssrc;
+    if (px && px.w < w) { sw = px.w; sh = px.h; ssrc = px.d; }
+    else {
+      sw = Math.ceil(w / d); sh = Math.ceil(h / d);
+      var tc = U.canvas(sw, sh), tx = tc.getContext('2d', { willReadFrequently: true });
+      tx.drawImage(heightCanvas, 0, 0, sw, sh);
+      ssrc = tx.getImageData(0, 0, sw, sh).data;
+    }
+    var sc = U.canvas(sw, sh), sx = sc.getContext('2d'), simg = sx.createImageData(sw, sh);
+    normalRows(ssrc, sw, sh, strength * sw / w, simg.data, 0, sh);
+    sx.putImageData(simg, 0, 0);
+    stretchInto(out, sc);
+    // 高さ Canvas の本番は先に積まれているので、順に進めればこの時点で描けている
+    BG.add((function* () {
+      var src2 = pixelsOf(heightCanvas);
+      heightCanvas._px = null;
+      var img2 = octx.createImageData(w, h);
+      for (var y = 0; y < h; y += 8) { normalRows(src2, w, h, strength, img2.data, y, Math.min(h, y + 8)); if (BG.over()) yield; }
+      octx.putImageData(img2, 0, 0);
+      U.touchCanvas(out);
+    })());
     return out;
   };
 
@@ -189,7 +295,7 @@ function(t,e){"object"==typeof exports&&"undefined"!=typeof module?e(exports):"f
   var prLevels = [1], prLevel = 0, frameEma = 16.7, slowT = 0, fastT = 0, graceT = 1.5;
   // 画素の予算: iPad など大きな画面で devicePixelRatio をそのまま使うと塗りが重すぎるため、
   // 最初は「幅×高さ×pr² ≦ PX_BUDGET」になる段から始め、余裕が続けば上げる。
-  var PX_BUDGET = 2.8e6, prCeil = 0, upAt = -1e9, nowT = 0;
+  var PX_BUDGET = 2.8e6, prCeil = 0, upAt = -1e9, nowT = 0, bgBusy = false;
 
   C.init = function (canvas) {
     try {
@@ -300,6 +406,8 @@ function(t,e){"object"==typeof exports&&"undefined"!=typeof module?e(exports):"f
     // 1回だけの長い停止（コンパイル・GC）で平均が跳ねないよう上限を切る
     frameEma += (Math.min(rawMs, 60) - frameEma) * 0.08;
     if (graceT > 0) { graceT -= dt; slowT = fastT = 0; return; }
+    // 裏の読み込み（本番テクスチャの描画）が動いている間は測らない（その分の重さで解像度を下げないように）
+    if (bgBusy) { slowT = fastT = 0; return; }
     // 約48fps を割る状態が続けば解像度を1段下げ、60fps 近くが長く続けば1段上げる
     if (frameEma > 21) { slowT += dt; fastT = 0; } else if (frameEma < 17.6) { fastT += dt; slowT = 0; } else { slowT = fastT = 0; }
     if (slowT > 1.2 && prLevel < prLevels.length - 1) {
@@ -399,6 +507,12 @@ function(t,e){"object"==typeof exports&&"undefined"!=typeof module?e(exports):"f
       try { shadowSync(); } catch (e) { r.shadowMap.needsUpdate = true; if (!C._sErr) { C._sErr = 1; logErr('shadowSync', e); } }
       try { r.render(C.scene, C.camera); } catch (e) { if (!C._rErr) { C._rErr = 1; logErr('render', e); } }
     }
+    // 描き終えた後の残り時間で、裏の読み込みを少しずつ進める（最初の暗転明けは少し多めに）
+    var bg = U.bg;
+    if (bg && bg.busy) {
+      bgBusy = true;
+      try { bg.run(C.time < 1.2 ? 9 : 5); } catch (e) { logErr('bg', e); }
+    } else if (bgBusy) { bgBusy = false; graceT = Math.max(graceT, 1); }
   }
 
   function startLoop() {
@@ -1942,16 +2056,37 @@ function(t,e){"object"==typeof exports&&"undefined"!=typeof module?e(exports):"f
       if (TEX.cookedMat) return TEX.cookedMat;
       var t = fillingTextures();
       var src = t.fillCol.image, S = src.width;
-      var out = U.canvas(S), ctx = out.getContext('2d');
-      ctx.drawImage(src, 0, 0);
-      var img = ctx.getImageData(0, 0, S, S), d = img.data;
-      for (var i = 0; i < d.length; i += 4) {
-        var r = d[i], g = d[i + 1], b = d[i + 2];
-        if (g > r * 0.9) { d[i] = r * 0.5 + 14; d[i + 1] = g * 0.72 + 22; d[i + 2] = b * 0.35 + 6; continue; } // ニラの緑ははっきり残す
-        var l = (r * 0.5 + g * 0.35 + b * 0.15);
-        d[i] = l * 0.78 + 24; d[i + 1] = l * 0.60 + 14; d[i + 2] = l * 0.44 + 8; // 火の通った肉の茶色（皮の白とはっきり違う）
+      var out = U.canvas(S);
+      function cook(c) {
+        var ctx = c.getContext('2d', { willReadFrequently: true }), W = c.width, H = c.height;
+        ctx.imageSmoothingEnabled = true;
+        ctx.drawImage(src, 0, 0, W, H);
+        var img = ctx.getImageData(0, 0, W, H), d = img.data;
+        return { ctx: ctx, img: img, d: d };
       }
-      ctx.putImageData(img, 0, 0);
+      function tone(d, i0, i1) {
+        for (var i = i0; i < i1; i += 4) {
+          var r = d[i], g = d[i + 1], b = d[i + 2];
+          if (g > r * 0.9) { d[i] = r * 0.5 + 14; d[i + 1] = g * 0.72 + 22; d[i + 2] = b * 0.35 + 6; continue; } // ニラの緑ははっきり残す
+          var l = (r * 0.5 + g * 0.35 + b * 0.15);
+          d[i] = l * 0.78 + 24; d[i + 1] = l * 0.60 + 14; d[i + 2] = l * 0.44 + 8; // 火の通った肉の茶色（皮の白とはっきり違う）
+        }
+      }
+      var dstep = U.draftStep(S, S);
+      if (dstep > 1) {
+        // 起動中は粗い版（断面が見えるのは食べる場面なので、本番は裏で）
+        var sm = U.canvas(Math.ceil(S / dstep)), sk = cook(sm);
+        tone(sk.d, 0, sk.d.length); sk.ctx.putImageData(sk.img, 0, 0);
+        out.getContext('2d').drawImage(sm, 0, 0, S, S);
+        U.bg.add((function* () {
+          var fk = cook(U.canvas(S)), step = S * 4 * 16;
+          for (var i = 0; i < fk.d.length; i += step) { tone(fk.d, i, Math.min(fk.d.length, i + step)); if (U.bg.over()) yield; }
+          out.getContext('2d').putImageData(fk.img, 0, 0);
+          U.touchCanvas(out);
+        })());
+      } else {
+        var k = cook(out); tone(k.d, 0, k.d.length); k.ctx.putImageData(k.img, 0, 0);
+      }
       TEX.cookedMat = new THREE.MeshPhysicalMaterial({
         map: U.canvasTex(out, { repeat: [1, 1] }), normalMap: t.fillNrm, normalScale: new THREE.Vector2(1.2, 1.2),
         roughness: 0.5, clearcoat: 0.4, clearcoatRoughness: 0.3
@@ -2898,7 +3033,8 @@ function(t,e){"object"==typeof exports&&"undefined"!=typeof module?e(exports):"f
     }
     this.dataTex.needsUpdate = true;
     hc.putImageData(himg, 0, 0);
-    var nc = U.normalFromHeight(this._nCanvas, 2.0);
+    this._nCanvas._px = { d: hd, w: S, h: S }; // 画素は手元にあるので読み戻さない
+    var nc = U.normalFromHeight(this._nCanvas, 2.0, true);
     this._nCanvas.getContext('2d').drawImage(nc, 0, 0);
     this.normalTex.needsUpdate = true;
   };
@@ -2949,26 +3085,26 @@ function(t,e){"object"==typeof exports&&"undefined"!=typeof module?e(exports):"f
   var TX = {};
   function cached(key, fn) { return TX[key] || (TX[key] = fn()); }
 
-  /* fn(u,v,x,y,o): o=[r,g,b, height, rough, alpha]（0..1） */
+  /* fn(u,v,x,y,o): o=[r,g,b, height, rough, alpha]（0..1）。
+     起動中は粗い版をすぐ返し、本番の解像度は裏で描いて同じ Canvas に書き戻す（U.progressivePixels） */
   function paint(w, h, fn, wantH, wantR) {
-    var cc = U.canvas(w, h), cx = cc.getContext('2d'), ci = cx.createImageData(w, h), cd = ci.data;
-    var hc, hx, hi, hd, rc, rx, ri, rd;
-    if (wantH) { hc = U.canvas(w, h); hx = hc.getContext('2d'); hi = hx.createImageData(w, h); hd = hi.data; }
-    if (wantR) { rc = U.canvas(w, h); rx = rc.getContext('2d'); ri = rx.createImageData(w, h); rd = ri.data; }
-    var o = [0, 0, 0, 0.5, 0.5, 1], p = 0;
-    for (var y = 0; y < h; y++) {
-      for (var x = 0; x < w; x++, p += 4) {
-        o[3] = 0.5; o[4] = 0.5; o[5] = 1;
-        fn(x / w, y / h, x, y, o);
-        cd[p] = o[0] * 255; cd[p + 1] = o[1] * 255; cd[p + 2] = o[2] * 255; cd[p + 3] = o[5] * 255;
-        if (hd) { var hv = o[3] * 255; hd[p] = hd[p + 1] = hd[p + 2] = hv; hd[p + 3] = 255; }
-        if (rd) { var rv = o[4] * 255; rd[p] = rd[p + 1] = rd[p + 2] = rv; rd[p + 3] = 255; }
+    var n = 1 + (wantH ? 1 : 0) + (wantR ? 1 : 0), iH = wantH ? 1 : -1, iR = wantR ? (wantH ? 2 : 1) : -1;
+    var o = [0, 0, 0, 0.5, 0.5, 1];
+    var cs = U.progressivePixels(w, h, n, function (D, bw, y0, y1, d) {
+      var cd = D[0], hd = iH > 0 ? D[iH] : null, rd = iR > 0 ? D[iR] : null;
+      for (var y = y0; y < y1; y++) {
+        var Y = Math.min(h - 1, y * d), p = y * bw * 4;
+        for (var x = 0; x < bw; x++, p += 4) {
+          var X = Math.min(w - 1, x * d);
+          o[3] = 0.5; o[4] = 0.5; o[5] = 1;
+          fn(X / w, Y / h, X, Y, o);
+          cd[p] = o[0] * 255; cd[p + 1] = o[1] * 255; cd[p + 2] = o[2] * 255; cd[p + 3] = o[5] * 255;
+          if (hd) { var hv = o[3] * 255; hd[p] = hd[p + 1] = hd[p + 2] = hv; hd[p + 3] = 255; }
+          if (rd) { var rv = o[4] * 255; rd[p] = rd[p + 1] = rd[p + 2] = rv; rd[p + 3] = 255; }
+        }
       }
-    }
-    cx.putImageData(ci, 0, 0);
-    if (hd) hx.putImageData(hi, 0, 0);
-    if (rd) rx.putImageData(ri, 0, 0);
-    return { color: cc, height: hc, rough: rc };
+    }, iH);
+    return { color: cs[0], height: iH > 0 ? cs[iH] : undefined, rough: iR > 0 ? cs[iR] : undefined };
   }
   function tex(canvas, rep, srgb) {
     return U.canvasTex(canvas, { srgb: srgb !== false, repeat: rep || [1, 1], aniso: 8 });
@@ -7193,6 +7329,9 @@ function(t,e){"object"==typeof exports&&"undefined"!=typeof module?e(exports):"f
     if (!ok) { fallback(); return; }
 
     tryDo('state', function () { G.state.load(); });
+    // ここから最初の絵までの間に作る重い手続きテクスチャは粗い版で出し、本番は遊びながら裏で描く（G.util.bg）
+    var bg = G.util && G.util.bg;
+    if (bg) bg.draft = true;
     tryDo('world', function () { if (G.world && G.world.build) G.world.build(G.core.scene, G.core.renderer); });
 
     var scene = G.core.scene;
@@ -7222,16 +7361,26 @@ function(t,e){"object"==typeof exports&&"undefined"!=typeof module?e(exports):"f
       else { tryDo('reset', function () { G.state.reset(); }); first = 'wrap'; }
     }
 
+    if (bg) bg.draft = false;
+
     G.core.start();
     tryDo('go', function () { G.flow.go(first); });
     G.core.fade(0, 0.8);
 
     // 最初の絵が出たあと、まだ見えていない道具（ほかの場面の物）のシェーダーも先にコンパイルしておく。
-    // 場面が変わった瞬間のコンパイルによる引っかかりを防ぐ。
+    // 場面が変わった瞬間のコンパイルによる引っかかりを防ぐ。使えるときは並列コンパイル（compileAsync）で
+    // メインの処理を止めずに進める。
     var waitF = 3;
     (function pre() {
       if (--waitF > 0) { requestAnimationFrame(pre); return; }
-      tryDo('precompile', function () { var c = G.core; if (c.renderer && !c.lost) c.renderer.compile(c.scene, c.camera); });
+      tryDo('precompile', function () {
+        var c = G.core, r = c.renderer;
+        if (!r || c.lost) return;
+        if (typeof r.compileAsync === 'function') {
+          var p = r.compileAsync(c.scene, c.camera);
+          if (p && p.catch) p.catch(function (e) { err('precompile', e); });
+        } else r.compile(c.scene, c.camera);
+      });
     })();
   }
 
