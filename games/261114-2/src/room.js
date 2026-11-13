@@ -1042,8 +1042,8 @@ const Room = (() => {
     const pulse = 0.72 + 0.28 * Math.sin(T * Math.PI * 2 / 1.2);
     const gb = glow.basket, gt = glow.trash;
     gb.a = damp(gb.a, gb.t, 5, dt); gt.a = damp(gt.a, gt.t, 5, dt);
-    basketGlow.visible = gb.a > 0.003; basketGlowMat.opacity = gb.a * pulse * 0.85; basketRimMat.emissiveIntensity = gb.a * pulse * 2.0; haloB.visible = basketGlow.visible; haloB.material.opacity = gb.a * pulse * 0.35;
-    trashGlow.visible = gt.a > 0.003; trashGlowMat.opacity = gt.a * pulse * 0.8; trashRimMat.emissiveIntensity = gt.a * pulse * 2.2; haloT.visible = trashGlow.visible; haloT.material.opacity = gt.a * pulse * 0.35;
+    basketGlow.visible = gb.a > 0.003; basketGlowMat.opacity = gb.a * pulse * 0.85; basketRimMat.emissiveIntensity = gb.a * pulse * 2.0; haloB.visible = basketGlow.visible; haloB.material.opacity = gb.a * pulse * 0.6;
+    trashGlow.visible = gt.a > 0.003; trashGlowMat.opacity = gt.a * pulse * 0.8; trashRimMat.emissiveIntensity = gt.a * pulse * 2.2; haloT.visible = trashGlow.visible; haloT.material.opacity = gt.a * pulse * 0.6;
   }
 
   return {

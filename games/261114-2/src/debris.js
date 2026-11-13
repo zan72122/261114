@@ -398,7 +398,7 @@ const Debris = (() => {
   }
   // 床でゆるく曲がった帯の形（必ず L.inPlay の中）
   function restCurve(S) {
-    for (let att = 0; att < 16; att++) {
+    for (let att = 0; att < 30; att++) {
       L.randomPlayPoint(rnd, tmpPt);
       let x = tmpPt.x, z = tmpPt.z, th = rnd() * TAU;
       const sgn = rnd() < 0.5 ? -1 : 1, k0 = sgn * (1.0 + rnd() * 2.4), k1 = 1.5 + rnd() * 3, p0 = rnd() * TAU;
@@ -407,16 +407,19 @@ const Debris = (() => {
       for (let j = 1; j < S.n && ok; j++) {
         th += (k0 + k1 * Math.sin(j / (S.n - 1) * 5 + p0)) * S.seg;
         let found = false;
-        for (let tr = 0; tr < 9; tr++) {
+        for (let tr = 0; tr < 4; tr++) {
           const nx = x + Math.cos(th) * S.seg, nz = z + Math.sin(th) * S.seg;
           if (L.inPlay(nx, nz)) { x = nx; z = nz; found = true; break; }
-          th += sgn * 0.42;
+          th += sgn * 0.22;
         }
         if (!found) ok = false;
         S.rx[j] = x; S.rz[j] = z;
       }
       if (ok) return;
     }
+    // 見つからないとき: 真ん中にゆるい弧
+    let th = -0.4, x = -0.3, z = 0.05;
+    for (let j = 0; j < S.n; j++) { S.rx[j] = x; S.rz[j] = z; th += 0.9 * S.seg; x += Math.cos(th) * S.seg * 0.9; z += Math.sin(th) * S.seg * 0.9; }
   }
 
   function burst(round, origin) {
