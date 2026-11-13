@@ -8,7 +8,7 @@ const Debris = (() => {
   const K_PC = 0, K_PS = 1, K_STAR = 2, K_BEAD = 3, K_POM = 4, NK = 5;
   const TYPE = ['paper', 'paper', 'star', 'bead', 'pom'];
   const BEAD_R = 0.0125, POM_R = 0.025;
-  const BLOB = [0.044, 0.044, 0.046, 0.036, 0.074];
+  const BLOB = [0.036, 0.036, 0.04, 0.036, 0.074];
   const RIB_HW = 0.006;
 
   // 色（本物の色紙・ホイル・樹脂・毛糸の色。彩度は控えめ）
@@ -254,7 +254,7 @@ const Debris = (() => {
     low = !!(Base.quality && Base.quality.low);
     const ptex = paperTex();
     const paperMat = new THREE.MeshStandardMaterial({ map: ptex, roughness: 0.74, metalness: 0, side: THREE.DoubleSide });
-    const starMat = new THREE.MeshStandardMaterial({ color: 0xffffff, metalness: 1, roughness: 0.27, side: THREE.DoubleSide, envMapIntensity: 1.25 });
+    const starMat = new THREE.MeshStandardMaterial({ color: 0xffffff, metalness: 0.88, roughness: 0.3, side: THREE.DoubleSide, envMapIntensity: 1.3 });
     const beadMat = new THREE.MeshPhysicalMaterial({ color: 0xffffff, roughness: 0.2, clearcoat: 1, clearcoatRoughness: 0.05 });
     const pomMat = new THREE.MeshPhysicalMaterial({
       color: 0xffffff, roughness: 1, metalness: 0, sheen: 1, sheenRoughness: 0.55, sheenColor: new THREE.Color(0xd8d8d8),
@@ -274,7 +274,7 @@ const Debris = (() => {
     }
     // 接地の影の丸
     blobMesh = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2),
-      new THREE.MeshBasicMaterial({ map: blobTex(), transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 }), MAXP);
+      new THREE.MeshBasicMaterial({ map: blobTex(), transparent: true, depthWrite: false }), MAXP);
     blobMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     for (let i = 0; i < MAXP; i++) blobMesh.setMatrixAt(i, ZERO);
     blobMesh.count = 0; blobMesh.frustumCulled = false; blobMesh.renderOrder = 1;
@@ -351,7 +351,7 @@ const Debris = (() => {
     ry0[i] = rnd() * TAU; yawSpd[i] = (rnd() < 0.5 ? -1 : 1) * (0.6 + rnd() * 2);
     rockA[i] = 0.3 + rnd() * 0.45;
     scl[i] = 0.86 + rnd() * 0.28;
-    restOff[i] = (k === K_STAR ? 0.0007 : 0.0011) + rnd() * 0.0013;
+    restOff[i] = (k === K_STAR ? 0.0012 : 0.0014) + rnd() * 0.0013;
     px[i] = ox[i]; py[i] = oy[i]; pz[i] = oz[i];
     return i;
   }
@@ -364,6 +364,7 @@ const Debris = (() => {
     scl[i] = k === K_BEAD ? 0.92 + rnd() * 0.16 : 0.9 + rnd() * 0.2;
     restOff[i] = k === K_BEAD ? BEAD_R * scl[i] : POM_R * scl[i] * 0.95;
     const rest = fy(tgx, tgz) + restOff[i];
+    tx[i] = tgx; tz[i] = tgz;
     vx[i] = (tgx - px[i]) / T; vz[i] = (tgz - pz[i]) / T;
     vy[i] = (rest - py[i] + 0.5 * G * T * T) / T;
     _q.setFromEuler(_e.set(rnd() * TAU, rnd() * TAU, rnd() * TAU));
@@ -543,6 +544,7 @@ const Debris = (() => {
         const rest = fy(px[i], pz[i]) + restOff[i];
         if (py[i] <= rest && vy[i] < 0) {
           py[i] = rest; const imp = -vy[i]; bounces[i]++;
+          if (bounces[i] === 1) { px[i] = tx[i]; pz[i] = tz[i]; py[i] = fy(px[i], pz[i]) + restOff[i]; }
           if (k === K_BEAD) {
             fire(on.land, 'bead', sat(imp / 5.5));
             vy[i] = imp * 0.42;
@@ -584,7 +586,12 @@ const Debris = (() => {
           else if (k === K_BEAD) { const r = Math.max(0, sp - 0.25 * dt) / sp; vx[i] *= r; vz[i] *= r; }
         }
         if (vx[i] !== 0 || vz[i] !== 0) moveOnFloor(i, dt, pulled);
-        if (!pulled) headPush(i, dt);
+        if (!pulled) {
+          headPush(i, dt);
+          // 動ける範囲（かご・ごみ箱の外）からは出さない
+          L.clampReach(px[i], pz[i], tmpPt);
+          if (tmpPt.x !== px[i] || tmpPt.z !== pz[i]) { px[i] = tmpPt.x; pz[i] = tmpPt.z; vx[i] *= -0.3; vz[i] *= -0.3; }
+        }
         if (k === K_BEAD) { rollQ(i, dt, BEAD_R * scl[i]); py[i] = fy(px[i], pz[i]) + restOff[i]; }
         else if (k === K_POM) {
           rollQ(i, dt, POM_R * scl[i]);
@@ -642,7 +649,7 @@ const Debris = (() => {
       const fade = sat(1 - hgt / 0.45) * sfade;
       if (fade < 0.03) { blobMesh.setMatrixAt(i, ZERO); continue; }
       const b = BLOB[k] * scl[i] * Math.sqrt(fade);
-      _p.set(px[i], gnd + 0.0005, pz[i]); _q.identity(); _s.set(b, 1, b);
+      _p.set(px[i], gnd + 0.0004, pz[i]); _q.identity(); _s.set(b, 1, b);
       _m.compose(_p, _q, _s); blobMesh.setMatrixAt(i, _m);
     }
     for (const m of meshes) { m.count = hi; m.instanceMatrix.needsUpdate = true; }
@@ -795,7 +802,7 @@ const Debris = (() => {
     for (let i = 0; i < hi; i++) if (state[i] === FLOOR) R++;
     for (const S of streamers) if (S.st === 2) R++;
     const step = Math.max(1, Math.ceil(R / 56));
-    const few = R <= 10, size = (few ? 0.085 : 0.05) * twAmp;
+    const few = R <= 20, size = (few ? 0.085 : 0.055) * twAmp;
     let n = 0, c = 0;
     const put = (x, y, z, phase) => {
       if (n >= 64) return;
@@ -828,7 +835,7 @@ const Debris = (() => {
   }
   function basketPose(k, order, g) {
     const b = L.basket, psi = 0.5 + order * 1.9;
-    const cx = b.x + (order ? 0.03 : -0.015), cz = b.z + (order ? 0.02 : -0.01);
+    const cx = b.x + (order ? 0.014 : -0.008), cz = b.z + (order ? 0.012 : -0.004);
     g.psi = psi; g.x = cx - dirX(psi) * k.cd; g.z = cz - dirZ(psi) * k.cd; g.y = 0.028 + order * 0.017; g.tilt = order ? 0.08 : 0.03;
   }
   function stuckPose(k, g, jit) {

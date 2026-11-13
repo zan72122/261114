@@ -100,7 +100,7 @@ const Jar = (() => {
   function clearPlastic(side, tex) {
     const m = new THREE.MeshPhysicalMaterial({
       color: 0xe8f3f3, map: tex, metalness: 0, roughness: 0.06, ior: 1.58, clearcoat: 1, clearcoatRoughness: 0.04,
-      transparent: true, opacity: 1, depthWrite: false, side, envMapIntensity: 1.6,
+      transparent: true, opacity: 1, depthWrite: false, side, envMapIntensity: 1.2,
     });
     m.premultipliedAlpha = true;
     m.onBeforeCompile = sh => {
@@ -110,8 +110,16 @@ const Jar = (() => {
           'jfr = jfr * jfr * jfr;',
           'float jaa = clamp( diffuseColor.a + jfr * 0.42, 0.0, 1.0 );',
           'vec3 jsp = max( outgoingLight - totalDiffuse, vec3( 0.0 ) );',
-          'gl_FragColor = vec4( totalDiffuse * jaa + jsp, jaa );',
+          'vec3 jdf = totalDiffuse;',
+          '#if defined( TONE_MAPPING )',
+          'jdf = toneMapping( jdf ); jsp = toneMapping( jsp );',
+          '#endif',
+          // 色空間の変換をしてから足す（線形のまま乗算済みにすると白く浮く）
+          'jdf = linearToOutputTexel( vec4( jdf, 1.0 ) ).rgb; jsp = linearToOutputTexel( vec4( jsp, 1.0 ) ).rgb;',
+          'gl_FragColor = vec4( jdf * jaa + jsp, jaa );',
         ].join('\n'))
+        .replace('#include <tonemapping_fragment>', '')
+        .replace('#include <colorspace_fragment>', '')
         .replace('#include <premultiplied_alpha_fragment>', '');
     };
     m.customProgramCacheKey = () => 'jarClear';
@@ -286,13 +294,14 @@ const Jar = (() => {
         let k = seen.get(key); if (k === undefined) { k = 0.93 + r2() * 0.12; seen.set(key, k); }
         p.setXYZ(i, p.getX(i) * k, p.getY(i) * k, p.getZ(i) * k);
       }
-      pomG.computeVertexNormals(); }
+      const nn = pomG.attributes.normal;
+      for (let i = 0; i < p.count; i++) { tv.set(p.getX(i), p.getY(i), p.getZ(i)).normalize(); nn.setXYZ(i, tv.x, tv.y, tv.z); } }
 
     const defs = [
       [new THREE.PlaneGeometry(0.035, 0.035), new THREE.MeshStandardMaterial({ map: paperTex, roughness: 0.78, side: THREE.DoubleSide })],
       [new THREE.CircleGeometry(0.019, 14), new THREE.MeshStandardMaterial({ map: paperTex, roughness: 0.78, side: THREE.DoubleSide })],
       [starG, new THREE.MeshStandardMaterial({ metalness: 1, roughness: 0.2, envMapIntensity: 1.4 })],
-      [new THREE.SphereGeometry(0.0125, 14, 10), new THREE.MeshPhysicalMaterial({ roughness: 0.14, clearcoat: 1, clearcoatRoughness: 0.08, envMapIntensity: 1.2 })],
+      [new THREE.SphereGeometry(0.0125, 12, 8), new THREE.MeshPhysicalMaterial({ roughness: 0.14, clearcoat: 1, clearcoatRoughness: 0.08, envMapIntensity: 1.2 })],
       [pomG, new THREE.MeshPhysicalMaterial({ map: fuzzTex, roughness: 0.95, sheen: 1, sheenRoughness: 0.55, sheenColor: new THREE.Color(0x9a9a9a) })],
     ];
     meshes = defs.map(([geo, mat]) => {

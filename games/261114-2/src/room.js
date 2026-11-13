@@ -125,7 +125,7 @@ const Room = (() => {
       ctx.fillStyle = '#5a3f28'; ctx.fillRect(0, 0, W, H);
       const board = (x, y, w, h, r) => {
         ctx.save(); ctx.beginPath(); ctx.rect(x, y, w, h); ctx.clip();
-        const hue = 29 + r() * 6, s = 30 + r() * 12, l = 47 + r() * 10;
+        const hue = 27 + r() * 6, s = 24 + r() * 10, l = 40 + r() * 9;
         ctx.fillStyle = `hsl(${hue},${s}%,${l}%)`; ctx.fillRect(x, y, w, h);
         const g = ctx.createLinearGradient(x, y, x, y + h);
         g.addColorStop(0, `rgba(70,40,18,${r() * 0.14})`); g.addColorStop(0.5, `rgba(255,232,195,${r() * 0.08})`); g.addColorStop(1, `rgba(70,40,18,${r() * 0.14})`);
@@ -289,7 +289,7 @@ const Room = (() => {
     const e = lerp(40, 13, t) * D, az = lerp(22, 9, t) * D;
     return sunDir.set(Math.cos(e) * Math.cos(az), -Math.sin(e), -Math.cos(e) * Math.sin(az)).normalize();
   }
-  const RX = [[-2.6, 1.7], [0, 1.0], [-2.6, 2.3]];         // 影を受ける範囲（床〜ソファ手前）
+  const RX = [[-2.6, 2.6], [0, 2.4], [-2.6, 2.3]];         // 影を受ける範囲（見える部屋全体: 窓以外は日が当たらないため）
   const CX = [[-2.8, 2.6], [0, 2.45], [-2.6, 4.2]];        // 影を落とす範囲（窓の壁・天井を含む）
   function fitShadow() {
     sun.position.copy(sunTarget).addScaledVector(sunDir, -14);
@@ -310,12 +310,12 @@ const Room = (() => {
     cam.updateProjectionMatrix();
   }
   function buildLights() {
-    hemi = new THREE.HemisphereLight(0xf6f2ec, 0xa08466, 1.05);
+    hemi = new THREE.HemisphereLight(0xf6f2ec, 0xb9a284, 0.75);
     sun = new THREE.DirectionalLight(0xfff0dc, 3.2);
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);
     sun.shadow.bias = -0.0005; sun.shadow.normalBias = 0.025;
-    fillLight = new THREE.DirectionalLight(0xfff7ee, 0.55);
+    fillLight = new THREE.DirectionalLight(0xfff7ee, 0.35);
     fillLight.position.set(1.5, 3.2, 4.0);
     lampLight = new THREE.PointLight(0xffb870, 0, 6, 2);
     scene.add(hemi, sun, sun.target, fillLight, lampLight);
@@ -323,10 +323,10 @@ const Room = (() => {
   }
 
   // ------------------------------------------------------------ 部屋
-  let floorMat = null, wallMat = null;
+  let floorMat = null, wallMat = null, ceilEmis = null;
   function buildRoom() {
     const R = L.room, W = R.xMax - R.xMin, Dp = R.zSouth - R.zNorth, cz = (R.zNorth + R.zSouth) / 2;
-    floorMat = std({ map: TX.floor, bumpMap: TX.floor, bumpScale: 0.8, roughness: 0.46, metalness: 0, color: 0xf2e6d8 });
+    floorMat = std({ map: TX.floor, bumpMap: TX.floor, bumpScale: 0.8, roughness: 0.46, metalness: 0, color: 0xe6dccf });
     const floor = new THREE.Mesh(new THREE.PlaneGeometry(W, Dp), floorMat);
     floor.rotation.x = -Math.PI / 2; floor.position.set(0, 0, cz); floor.receiveShadow = true;
     scene.add(floor);
@@ -347,7 +347,8 @@ const Room = (() => {
     ]);
     const west = new THREE.Mesh(westG, wallMat); west.castShadow = true; west.receiveShadow = true; scene.add(west);
     // 天井（窓より上の光をさえぎる）
-    const ceilMat = std({ color: 0xf7f5f1, map: TX.wall, roughness: 0.95 });
+    const ceilMat = std({ color: 0xf7f5f1, map: TX.wall, roughness: 0.95, emissive: 0xf4efe6, emissiveIntensity: 0.32 });
+    ceilEmis = ceilMat;
     ceilMat.shadowSide = THREE.DoubleSide;
     const ceil = new THREE.Mesh(new THREE.PlaneGeometry(W + 0.3, Dp), ceilMat);
     ceil.rotation.x = Math.PI / 2; ceil.position.set(0, R.ceil, cz); ceil.castShadow = true; scene.add(ceil);
@@ -388,11 +389,11 @@ const Room = (() => {
   let trackCtx = null, trackTex = null;
   const TRK = 1024;
   let fringe = null;
-  const NF = 72, fX = new Float32Array(NF), fJit = new Float32Array(NF), fLen = new Float32Array(NF), fPh = new Float32Array(NF), fA = new Float32Array(NF);
+  const NF = 88, fX = new Float32Array(NF), fJit = new Float32Array(NF), fLen = new Float32Array(NF), fPh = new Float32Array(NF), fA = new Float32Array(NF);
   let fHx = 0, fHz = 99, fSuc = 0, fMax = 0;
   function buildRug() {
     const g = L.rug, w = g.xMax - g.xMin, d = g.zMax - g.zMin, cx = (g.xMin + g.xMax) / 2, cz = (g.zMin + g.zMax) / 2;
-    const rugMat = std({ color: 0xd8cdbd, map: TX.rug, bumpMap: TX.rug, bumpScale: 2.2, roughness: 0.97 });
+    const rugMat = std({ color: 0xc8bdac, map: TX.rug, bumpMap: TX.rug, bumpScale: 2.2, roughness: 0.97 });
     const rug = new THREE.Mesh(rbox(w, g.pile * 2, d, 0.006, 2), rugMat);
     rug.position.set(cx, 0, cz); rug.receiveShadow = true; scene.add(rug);
     // 掃除機の跡（透明オーバーレイ）
@@ -405,7 +406,7 @@ const Room = (() => {
     tr.rotation.x = -Math.PI / 2; tr.position.set(cx, g.pile + 0.0006, cz); tr.renderOrder = 1; tr.receiveShadow = true;
     scene.add(tr);
     // 房（南端 NF 本 + 北端 NF 本）
-    const fg = new THREE.CylinderGeometry(0.0024, 0.0017, 1, 5, 1);
+    const fg = new THREE.CylinderGeometry(0.0028, 0.002, 1, 5, 1);
     fg.rotateX(Math.PI / 2); fg.translate(0, 0, 0.5);
     const fm = std({ color: 0xe6ddcf, map: TX.thread, roughness: 0.95 });
     fringe = new THREE.InstancedMesh(fg, fm, NF * 2);
@@ -458,7 +459,7 @@ const Room = (() => {
     ctx.globalCompositeOperation = 'destination-out'; ctx.fillStyle = '#000'; ctx.fill();
     ctx.globalCompositeOperation = 'source-over';
     const t = -dz / len; // + = 奥へ押す
-    ctx.fillStyle = t >= 0 ? `rgba(255,252,246,${(0.09 + 0.08 * t).toFixed(3)})` : `rgba(64,54,44,${(0.08 + 0.08 * -t).toFixed(3)})`;
+    ctx.fillStyle = t >= 0 ? `rgba(255,253,248,${(0.06 + 0.06 * t).toFixed(3)})` : `rgba(96,86,74,${(0.05 + 0.06 * -t).toFixed(3)})`;
     ctx.fill();
     trackTex.needsUpdate = true;
   }
@@ -628,6 +629,14 @@ const Room = (() => {
   }
 
   // ------------------------------------------------------------ 洗濯かご
+  let haloB = null, haloT = null;
+  function halo(x, z, size) {
+    const m = new THREE.MeshBasicMaterial({ color: 0xffc78a, alphaMap: TX.blob, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending,
+      polygonOffset: true, polygonOffsetFactor: -6, polygonOffsetUnits: -6 });
+    const h = new THREE.Mesh(new THREE.PlaneGeometry(size, size), m);
+    h.rotation.x = -Math.PI / 2; h.position.set(x, L.rug.pile * 2 + 0.002, z); h.renderOrder = 3; h.visible = false; scene.add(h);
+    return h;
+  }
   let basketRimMat = null, basketGlowMat = null, basketGlow = null;
   function buildBasket() {
     const b = L.basket, y = L.rug.pile * 2;
@@ -643,6 +652,7 @@ const Room = (() => {
     basketGlow = new THREE.Mesh(lathe([[0, 0.02], [0.14, 0.02], [0.162, 0.03], [b.r - 0.02, b.h - 0.02]], 40), basketGlowMat);
     basketGlow.renderOrder = 3; basketGlow.visible = false; grp.add(basketGlow);
     scene.add(grp);
+    haloB = halo(b.x, b.z, b.r * 3.6);
     blobs.push([b.x, L.rug.pile * 2 + 0.0012, b.z, b.r * 2.5, b.r * 2.5, 0.55]);
   }
 
@@ -650,7 +660,7 @@ const Room = (() => {
   let lidGrp = null, pedalGrp = null, lidA = 0, lidT = 0;
   let trashRimMat = null, trashGlowMat = null, trashGlow = null;
   let fillCtx = null, fillTex = null, fillMesh = null, fillLevel = 0.08;
-  const FILL0 = 0.075, FILLMAX = 0.30;
+  const FILL0 = 0.22, FILLMAX = 0.345;
   function drawFillBase() {
     const ctx = fillCtx, W = 256, r = Base.rng(121);
     ctx.fillStyle = '#9b948a'; ctx.fillRect(0, 0, W, W);
@@ -665,10 +675,11 @@ const Room = (() => {
     const grp = new THREE.Group(); grp.position.set(t.x, y, t.z); grp.rotation.y = -0.15;
     const steel = std({ color: 0xd5d6d4, metalness: 1, roughness: 0.3, bumpMap: TX.thread, bumpScale: 0.3 });
     const bodyProf = [[0, 0.012], [R - 0.012, 0.012], [R - 0.004, 0.02], [R, 0.04], [R, H - 0.03], [R - 0.002, H - 0.022], [R - 0.008, H - 0.022], [R - 0.008, 0.04], [0, 0.04]];
-    const body = new THREE.Mesh(lathe(bodyProf, 48), steel); body.castShadow = true; body.receiveShadow = true; grp.add(body);
+    const paint = std({ color: 0xeeece8, roughness: 0.38, metalness: 0 });
+    const body = new THREE.Mesh(lathe(bodyProf, 48), paint); body.castShadow = true; body.receiveShadow = true; grp.add(body);
     trashRimMat = std({ color: 0xcfd0ce, metalness: 1, roughness: 0.25, emissive: 0xffc98a, emissiveIntensity: 0 });
     const rim = new THREE.Mesh(new THREE.TorusGeometry(R - 0.004, 0.005, 8, 56), trashRimMat);
-    rim.rotation.x = Math.PI / 2; rim.position.y = H - 0.024; grp.add(rim);
+    rim.rotation.x = Math.PI / 2; rim.position.y = H - 0.034; rim.scale.setScalar((R + 0.0015) / (R - 0.004)); grp.add(rim);
     // 黒い樹脂（足のリング・ちょうつがい・ペダル受け）
     const dark = std({ color: 0x2b2d30, roughness: 0.55 });
     const darkG = merge([
@@ -696,18 +707,19 @@ const Room = (() => {
     // ふた（奥 = -z のちょうつがい）
     lidGrp = new THREE.Group(); lidGrp.position.set(0, H - 0.024, -R + 0.002); grp.add(lidGrp);
     const lid = new THREE.Mesh(lathe([[0, 0.0], [R - 0.01, 0.0], [R - 0.004, -0.005], [R + 0.004, -0.004], [R + 0.003, 0.002], [R - 0.012, 0.01], [0.11, 0.024], [0.06, 0.032], [0, 0.034]], 48), steel);
-    lid.position.z = R - 0.002; lid.castShadow = true; lidGrp.add(lid);
+    lid.material = paint; lid.position.z = R - 0.002; lid.castShadow = true; lidGrp.add(lid);
     // ペダル
     pedalGrp = new THREE.Group(); pedalGrp.position.set(0, 0.03, R + 0.008); grp.add(pedalGrp);
     const pedal = new THREE.Mesh(rbox(0.085, 0.012, 0.055, 0.005, 2), steel);
     pedal.position.set(0, 0.0, 0.026); pedal.rotation.x = 0.08; pedal.castShadow = true; pedalGrp.add(pedal);
     scene.add(grp);
+    haloT = halo(t.x, t.z, R * 4.0);
     blobs.push([t.x, L.rug.pile * 2 + 0.0012, t.z, R * 2.6, R * 2.6, 0.55]);
   }
   function setFillLevel(h) {
     fillLevel = clamp(h, FILL0, FILLMAX);
     fillMesh.position.y = fillLevel;
-    fillMesh.scale.y = 0.22 + 0.25 * (fillLevel - FILL0) / (FILLMAX - FILL0);
+    fillMesh.scale.y = 0.25 + 0.2 * (fillLevel - FILL0) / (FILLMAX - FILL0);
   }
   const fillRnd = Base.rng(131), _fc = new THREE.Color();
   const trash = {
@@ -724,7 +736,7 @@ const Room = (() => {
         ctx.fillRect(-4, -3, 5 + r() * 9, 3 + r() * 6); ctx.restore();
       }
       fillTex.needsUpdate = true;
-      setFillLevel(fillLevel + 0.0007);
+      setFillLevel(fillLevel + 0.0004);
     },
     reset() { if (!fillCtx) return; drawFillBase(); fillTex.needsUpdate = true; setFillLevel(FILL0); },
   };
@@ -962,17 +974,18 @@ const Room = (() => {
     sun.color.set(0xfff0dc).lerp(_c1.set(0xff9a4e), ts);
     sun.intensity = lerp(3.2, 1.7, ts);
     hemi.color.set(0xf6f2ec).lerp(_c1.set(0x8f93b4), ts);
-    hemi.groundColor.set(0xa08466).lerp(_c1.set(0x4e3d32), ts);
-    hemi.intensity = lerp(1.05, 0.36, ts);
-    fillLight.intensity = lerp(0.55, 0.08, ts);
+    hemi.groundColor.set(0xb9a284).lerp(_c1.set(0x4e3d32), ts);
+    hemi.intensity = lerp(0.75, 0.3, ts);
+    fillLight.intensity = lerp(0.35, 0.06, ts);
     const lamp = smooth((t1 - 0.25) / 0.75);
     lampLight.intensity = 5.5 * lamp;
     lampShadeMat.emissiveIntensity = 1.1 * lamp;
     bulbMat.emissiveIntensity = 6 * lamp;
     outsideMat.color.setRGB(1, 1, 1).lerp(_c1.setRGB(0.95, 0.55, 0.35), ts);
     if (scene.background && scene.background.isColor) scene.background.copy(BG_DAY).lerp(BG_EVE, ts);
-    const ei = lerp(1, 0.35, ts);
+    const ei = lerp(0.8, 0.3, ts);
     for (const m of envMats) m.envMapIntensity = ei;
+    ceilEmis.emissiveIntensity = lerp(0.32, 0.06, ts);
     fitShadow();
   }
   function applyQuality() {
@@ -990,6 +1003,7 @@ const Room = (() => {
   function init(ctx) {
     if (ready) return;
     scene = ctx.scene;
+    const n0 = scene.children.length;
     makeTextures();
     scene.background = BG_DAY.clone();
     buildLights();
@@ -1003,6 +1017,10 @@ const Room = (() => {
     buildTrash();
     buildKusu();
     buildBlobs();
+    // 日は窓からしか入らないので、受ける側はすべて影を受ける
+    for (let i = n0; i < scene.children.length; i++) scene.children[i].traverse(o => {
+      if (o.isMesh && o.material && o.material.isMeshStandardMaterial) o.receiveShadow = true;
+    });
     ready = true;
     applyQuality();
     setTime(timeT);
@@ -1024,8 +1042,8 @@ const Room = (() => {
     const pulse = 0.72 + 0.28 * Math.sin(T * Math.PI * 2 / 1.2);
     const gb = glow.basket, gt = glow.trash;
     gb.a = damp(gb.a, gb.t, 5, dt); gt.a = damp(gt.a, gt.t, 5, dt);
-    basketGlow.visible = gb.a > 0.003; basketGlowMat.opacity = gb.a * pulse * 0.5; basketRimMat.emissiveIntensity = gb.a * pulse * 0.7;
-    trashGlow.visible = gt.a > 0.003; trashGlowMat.opacity = gt.a * pulse * 0.5; trashRimMat.emissiveIntensity = gt.a * pulse * 0.9;
+    basketGlow.visible = gb.a > 0.003; basketGlowMat.opacity = gb.a * pulse * 0.85; basketRimMat.emissiveIntensity = gb.a * pulse * 2.0; haloB.visible = basketGlow.visible; haloB.material.opacity = gb.a * pulse * 0.35;
+    trashGlow.visible = gt.a > 0.003; trashGlowMat.opacity = gt.a * pulse * 0.8; trashRimMat.emissiveIntensity = gt.a * pulse * 2.2; haloT.visible = trashGlow.visible; haloT.material.opacity = gt.a * pulse * 0.35;
   }
 
   return {
