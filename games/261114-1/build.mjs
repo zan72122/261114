@@ -9,7 +9,7 @@ const out = process.argv[2] ? path.resolve(process.argv[2]) : path.join(dir, 'in
 const esc = (s) => s.replace(/<\/script/gi, '<\\/script');
 
 let three = fs.readFileSync(path.join(dir, 'vendor/three.min.js'), 'utf8');
-three = three.replace(/^console\.warn\([^;]*\);/, '');
+three = three.replace(/^console\.warn\('[^']*'\),/, '');
 
 const srcDir = path.join(dir, 'src');
 const files = fs.readdirSync(srcDir).filter((f) => f.endsWith('.js')).sort();
