@@ -62,7 +62,7 @@
      Canvas の大きさは変えないので、それを使うテクスチャは needsUpdate だけで差し替わる。 */
   var BG = (U.bg = { jobs: [], draft: false, busy: false, deadline: 0 });
   function now() { return (window.performance && performance.now) ? performance.now() : Date.now(); }
-  BG.add = function (it) { BG.jobs.push(it); BG.busy = true; };
+  BG.add = function (it, first) { if (first) BG.jobs.unshift(it); else BG.jobs.push(it); BG.busy = true; };
   BG.over = function () { return now() >= BG.deadline; };
   /* ms ミリ秒まで仕事を進める。残りがあれば true */
   BG.run = function (ms) {
@@ -181,19 +181,18 @@
       octx.putImageData(img, 0, 0);
       return out;
     }
-    // 粗い版: 作った時の粗い画素があればそれを、なければ縮めて読む
-    var px = heightCanvas._px, sw, sh, ssrc;
-    if (px && px.w < w) { sw = px.w; sh = px.h; ssrc = px.d; }
-    else {
-      sw = Math.ceil(w / d); sh = Math.ceil(h / d);
-      var tc = U.canvas(sw, sh), tx = tc.getContext('2d', { willReadFrequently: true });
-      tx.drawImage(heightCanvas, 0, 0, sw, sh);
-      ssrc = tx.getImageData(0, 0, sw, sh).data;
+    // 粗い版: 作った時の粗い画素があればそれから。無い（Canvas に線や円で描いた）高さは、読み戻しが重いので
+    // 起動中は平らな法線にしておき、本番を裏の仕事の先頭に積む（元の Canvas はもう出来上がっている）
+    var px = heightCanvas._px, first = !(px && px.w < w);
+    if (!first) {
+      var sw = px.w, sh = px.h;
+      var sc = U.canvas(sw, sh), sx = sc.getContext('2d'), simg = sx.createImageData(sw, sh);
+      normalRows(px.d, sw, sh, strength * sw / w, simg.data, 0, sh);
+      sx.putImageData(simg, 0, 0);
+      stretchInto(out, sc);
+    } else {
+      octx.fillStyle = 'rgb(128,128,255)'; octx.fillRect(0, 0, w, h);
     }
-    var sc = U.canvas(sw, sh), sx = sc.getContext('2d'), simg = sx.createImageData(sw, sh);
-    normalRows(ssrc, sw, sh, strength * sw / w, simg.data, 0, sh);
-    sx.putImageData(simg, 0, 0);
-    stretchInto(out, sc);
     // 高さ Canvas の本番は先に積まれているので、順に進めればこの時点で描けている
     BG.add((function* () {
       var src2 = pixelsOf(heightCanvas);
@@ -202,7 +201,7 @@
       for (var y = 0; y < h; y += 8) { normalRows(src2, w, h, strength, img2.data, y, Math.min(h, y + 8)); if (BG.over()) yield; }
       octx.putImageData(img2, 0, 0);
       U.touchCanvas(out);
-    })());
+    })(), first);
     return out;
   };
 

@@ -94,7 +94,7 @@ function(t,e){"object"==typeof exports&&"undefined"!=typeof module?e(exports):"f
      Canvas の大きさは変えないので、それを使うテクスチャは needsUpdate だけで差し替わる。 */
   var BG = (U.bg = { jobs: [], draft: false, busy: false, deadline: 0 });
   function now() { return (window.performance && performance.now) ? performance.now() : Date.now(); }
-  BG.add = function (it) { BG.jobs.push(it); BG.busy = true; };
+  BG.add = function (it, first) { if (first) BG.jobs.unshift(it); else BG.jobs.push(it); BG.busy = true; };
   BG.over = function () { return now() >= BG.deadline; };
   /* ms ミリ秒まで仕事を進める。残りがあれば true */
   BG.run = function (ms) {
@@ -213,19 +213,18 @@ function(t,e){"object"==typeof exports&&"undefined"!=typeof module?e(exports):"f
       octx.putImageData(img, 0, 0);
       return out;
     }
-    // 粗い版: 作った時の粗い画素があればそれを、なければ縮めて読む
-    var px = heightCanvas._px, sw, sh, ssrc;
-    if (px && px.w < w) { sw = px.w; sh = px.h; ssrc = px.d; }
-    else {
-      sw = Math.ceil(w / d); sh = Math.ceil(h / d);
-      var tc = U.canvas(sw, sh), tx = tc.getContext('2d', { willReadFrequently: true });
-      tx.drawImage(heightCanvas, 0, 0, sw, sh);
-      ssrc = tx.getImageData(0, 0, sw, sh).data;
+    // 粗い版: 作った時の粗い画素があればそれから。無い（Canvas に線や円で描いた）高さは、読み戻しが重いので
+    // 起動中は平らな法線にしておき、本番を裏の仕事の先頭に積む（元の Canvas はもう出来上がっている）
+    var px = heightCanvas._px, first = !(px && px.w < w);
+    if (!first) {
+      var sw = px.w, sh = px.h;
+      var sc = U.canvas(sw, sh), sx = sc.getContext('2d'), simg = sx.createImageData(sw, sh);
+      normalRows(px.d, sw, sh, strength * sw / w, simg.data, 0, sh);
+      sx.putImageData(simg, 0, 0);
+      stretchInto(out, sc);
+    } else {
+      octx.fillStyle = 'rgb(128,128,255)'; octx.fillRect(0, 0, w, h);
     }
-    var sc = U.canvas(sw, sh), sx = sc.getContext('2d'), simg = sx.createImageData(sw, sh);
-    normalRows(ssrc, sw, sh, strength * sw / w, simg.data, 0, sh);
-    sx.putImageData(simg, 0, 0);
-    stretchInto(out, sc);
     // 高さ Canvas の本番は先に積まれているので、順に進めればこの時点で描けている
     BG.add((function* () {
       var src2 = pixelsOf(heightCanvas);
@@ -234,7 +233,7 @@ function(t,e){"object"==typeof exports&&"undefined"!=typeof module?e(exports):"f
       for (var y = 0; y < h; y += 8) { normalRows(src2, w, h, strength, img2.data, y, Math.min(h, y + 8)); if (BG.over()) yield; }
       octx.putImageData(img2, 0, 0);
       U.touchCanvas(out);
-    })());
+    })(), first);
     return out;
   };
 
@@ -295,7 +294,7 @@ function(t,e){"object"==typeof exports&&"undefined"!=typeof module?e(exports):"f
   var prLevels = [1], prLevel = 0, frameEma = 16.7, slowT = 0, fastT = 0, graceT = 1.5;
   // 画素の予算: iPad など大きな画面で devicePixelRatio をそのまま使うと塗りが重すぎるため、
   // 最初は「幅×高さ×pr² ≦ PX_BUDGET」になる段から始め、余裕が続けば上げる。
-  var PX_BUDGET = 2.8e6, prCeil = 0, upAt = -1e9, nowT = 0, bgBusy = false;
+  var PX_BUDGET = 2.8e6, prCeil = 0, upAt = -1e9, nowT = 0, bgBusy = false, bgT0 = null;
 
   C.init = function (canvas) {
     try {
@@ -507,11 +506,13 @@ function(t,e){"object"==typeof exports&&"undefined"!=typeof module?e(exports):"f
       try { shadowSync(); } catch (e) { r.shadowMap.needsUpdate = true; if (!C._sErr) { C._sErr = 1; logErr('shadowSync', e); } }
       try { r.render(C.scene, C.camera); } catch (e) { if (!C._rErr) { C._rErr = 1; logErr('render', e); } }
     }
-    // 描き終えた後の残り時間で、裏の読み込みを少しずつ進める（最初の暗転明けは少し多めに）
+    // 描き終えた後の残り時間で、裏の読み込みを少しずつ進める（最初の明転が終わってから）
     var bg = U.bg;
     if (bg && bg.busy) {
       bgBusy = true;
-      try { bg.run(C.time < 1.2 ? 9 : 5); } catch (e) { logErr('bg', e); }
+      if (bgT0 == null) bgT0 = ts;
+      // 1フレームに 5ms（重い端末でフレームが長いときは最大 8ms）まで
+      if (ts - bgT0 > 1000) { try { bg.run(Math.min(8, Math.max(5, raw * 0.25))); } catch (e) { logErr('bg', e); } }
     } else if (bgBusy) { bgBusy = false; graceT = Math.max(graceT, 1); }
   }
 
@@ -2074,10 +2075,9 @@ function(t,e){"object"==typeof exports&&"undefined"!=typeof module?e(exports):"f
       }
       var dstep = U.draftStep(S, S);
       if (dstep > 1) {
-        // 起動中は粗い版（断面が見えるのは食べる場面なので、本番は裏で）
-        var sm = U.canvas(Math.ceil(S / dstep)), sk = cook(sm);
-        tone(sk.d, 0, sk.d.length); sk.ctx.putImageData(sk.img, 0, 0);
-        out.getContext('2d').drawImage(sm, 0, 0, S, S);
+        // 起動中は平均の色だけ（断面が見えるのは食べる場面なので、画素の読み戻しを含む本番は裏で）
+        var ox = out.getContext('2d');
+        ox.fillStyle = 'rgb(148,109,78)'; ox.fillRect(0, 0, S, S);
         U.bg.add((function* () {
           var fk = cook(U.canvas(S)), step = S * 4 * 16;
           for (var i = 0; i < fk.d.length; i += step) { tone(fk.d, i, Math.min(fk.d.length, i + step)); if (U.bg.over()) yield; }

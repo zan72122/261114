@@ -166,10 +166,9 @@
       }
       var dstep = U.draftStep(S, S);
       if (dstep > 1) {
-        // 起動中は粗い版（断面が見えるのは食べる場面なので、本番は裏で）
-        var sm = U.canvas(Math.ceil(S / dstep)), sk = cook(sm);
-        tone(sk.d, 0, sk.d.length); sk.ctx.putImageData(sk.img, 0, 0);
-        out.getContext('2d').drawImage(sm, 0, 0, S, S);
+        // 起動中は平均の色だけ（断面が見えるのは食べる場面なので、画素の読み戻しを含む本番は裏で）
+        var ox = out.getContext('2d');
+        ox.fillStyle = 'rgb(148,109,78)'; ox.fillRect(0, 0, S, S);
         U.bg.add((function* () {
           var fk = cook(U.canvas(S)), step = S * 4 * 16;
           for (var i = 0; i < fk.d.length; i += step) { tone(fk.d, i, Math.min(fk.d.length, i + step)); if (U.bg.over()) yield; }

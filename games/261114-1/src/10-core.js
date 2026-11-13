@@ -33,7 +33,7 @@
   var prLevels = [1], prLevel = 0, frameEma = 16.7, slowT = 0, fastT = 0, graceT = 1.5;
   // 画素の予算: iPad など大きな画面で devicePixelRatio をそのまま使うと塗りが重すぎるため、
   // 最初は「幅×高さ×pr² ≦ PX_BUDGET」になる段から始め、余裕が続けば上げる。
-  var PX_BUDGET = 2.8e6, prCeil = 0, upAt = -1e9, nowT = 0, bgBusy = false;
+  var PX_BUDGET = 2.8e6, prCeil = 0, upAt = -1e9, nowT = 0, bgBusy = false, bgT0 = null;
 
   C.init = function (canvas) {
     try {
@@ -245,11 +245,13 @@
       try { shadowSync(); } catch (e) { r.shadowMap.needsUpdate = true; if (!C._sErr) { C._sErr = 1; logErr('shadowSync', e); } }
       try { r.render(C.scene, C.camera); } catch (e) { if (!C._rErr) { C._rErr = 1; logErr('render', e); } }
     }
-    // 描き終えた後の残り時間で、裏の読み込みを少しずつ進める（最初の暗転明けは少し多めに）
+    // 描き終えた後の残り時間で、裏の読み込みを少しずつ進める（最初の明転が終わってから）
     var bg = U.bg;
     if (bg && bg.busy) {
       bgBusy = true;
-      try { bg.run(C.time < 1.2 ? 9 : 5); } catch (e) { logErr('bg', e); }
+      if (bgT0 == null) bgT0 = ts;
+      // 1フレームに 5ms（重い端末でフレームが長いときは最大 8ms）まで
+      if (ts - bgT0 > 1000) { try { bg.run(Math.min(8, Math.max(5, raw * 0.25))); } catch (e) { logErr('bg', e); } }
     } else if (bgBusy) { bgBusy = false; graceT = Math.max(graceT, 1); }
   }
 
