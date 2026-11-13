@@ -963,7 +963,7 @@
       return { map: tex(r.color), rough: tex(r.rough, null, false) };
     });
     g.add(mesh(lathe(pts, 48), phys({ color: 0xffffff, map: gt.map, roughnessMap: gt.rough, roughness: 1, clearcoat: 0.8, clearcoatRoughness: 0.1 }, 1)));
-    var tea = phys({ color: 0x8a8a2a, roughness: 0.03, transparent: true, opacity: 0.9, clearcoat: 1 }, 1.2);
+    var tea = phys({ color: 0x5c5a1c, roughness: 0.06 }, 0.8);
     var tm = mesh(new THREE.CircleGeometry(0.322, 40).rotateX(-PI / 2), tea, false, true);
     tm.position.y = 0.6;
     g.add(tm);
@@ -1166,7 +1166,7 @@
   W.time = function () { return clock.t; };
 
   /* ───────────── 台所 ───────────── */
-  var CX0 = -7.5, CX1 = 9.7;
+  var CX0 = -7.5, CX1 = 9.84;
   function buildKitchen(root) {
     var st = stoneTex();
     var stoneM = std({ map: st.map, roughnessMap: st.rough, roughness: 1, color: 0xffffff }, 0.9);
@@ -1451,12 +1451,12 @@
     ring.position.y = GY + 0.025;
     bg.add(ring);
     for (var i = 0; i < 5; i++) {
-      var a = i / 5 * TAU + 0.3;
+      var a = i / 5 * TAU + 0.05;
       var claw = new THREE.Shape();
-      claw.moveTo(0, 0); claw.lineTo(0.48, 0); claw.lineTo(0.48, 0.11 - GY); claw.lineTo(0.06, 0.12 - GY); claw.lineTo(0.0, 0.07);
+      claw.moveTo(0, 0.008); claw.lineTo(0.48, 0.008); claw.lineTo(0.48, 0.1 - GY); claw.lineTo(0.06, 0.112 - GY); claw.lineTo(0.0, 0.07);
       var cg = new THREE.ExtrudeGeometry(claw, { depth: 0.04, bevelEnabled: true, bevelThickness: 0.008, bevelSize: 0.008, bevelSegments: 1 });
       cg.translate(0, 0, -0.02);
-      var cm = mesh(cg, iron);
+      var cm = mesh(cg, iron, false, true);
       cm.position.set(Math.cos(a) * 0.53, GY, Math.sin(a) * 0.53);
       cm.rotation.y = -a;
       bg.add(cm);
@@ -1577,9 +1577,9 @@
   /* ───────────── 食卓 ───────────── */
   function buildDining(root) {
     var A = W.anchors.eat;
-    var TX0 = A.x - 4, TX1 = A.x + 4, Z0 = -5, Z1 = 4.2, T = 0.38, r = 0.12;
+    var TX0 = A.x - 3.7, TX1 = A.x + 4, Z0 = -5, Z1 = 4.2, T = 0.38, r = 0.12;
     var ot = woodTex('oak');
-    var tw = 8, td = Z1 - Z0 + 0.8;
+    var tw = TX1 - TX0, td = Z1 - Z0 + 0.8;
     [ot.map, ot.rough, ot.normal].forEach(function (t) { t.repeat.set(1 / tw, 1 / td); t.offset.set(-TX0 / tw, 0); });
     var oakM = phys({ map: ot.map, roughnessMap: ot.rough, normalMap: ot.normal, normalScale: new THREE.Vector2(0.45, 0.45), roughness: 1, clearcoat: 0.35, clearcoatRoughness: 0.35 }, 0.8);
     var run = [];
@@ -1628,11 +1628,20 @@
     var wg = new THREE.PlaneGeometry(18, 17);
     var p = wg.attributes.position, uv = wg.attributes.uv;
     var wall = mesh(wg, wm, false, true);
-    wall.position.set(A.x + 1, 1.3, -5.2);
+    wall.position.set(A.x + 4.85, 1.3, -5.2);
     for (var i = 0; i < p.count; i++) uv.setXY(i, p.getX(i) + wall.position.x, p.getY(i) + wall.position.y);
     root.add(wall);
     var base = mesh(new THREE.BoxGeometry(18, 0.8, 0.12), std({ color: 0xf2ece2, roughness: 0.6 }, 0.6));
     base.position.set(A.x + 1, -6.8, -5.14);
     root.add(base);
+    /* 台所と食卓を分ける壁（x=9.85）。両側から見て自然な壁 */
+    var pg = new THREE.PlaneGeometry(20, 19);
+    var pp = pg.attributes.position, puv = pg.attributes.uv;
+    for (i = 0; i < pp.count; i++) puv.setXY(i, pp.getX(i), pp.getY(i));
+    var pm = std({ map: pl.map, normalMap: pl.normal, normalScale: new THREE.Vector2(0.6, 0.6), roughness: 0.9, side: THREE.DoubleSide, color: 0xfff6ee }, 0.6);
+    var part = mesh(pg, pm, false, true);
+    part.rotation.y = PI / 2;
+    part.position.set(9.85, 0, 4.8);
+    root.add(part);
   }
 })();

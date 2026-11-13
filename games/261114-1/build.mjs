@@ -9,10 +9,14 @@ const out = process.argv[2] ? path.resolve(process.argv[2]) : path.join(dir, 'in
 const esc = (s) => s.replace(/<\/script/gi, '<\\/script');
 
 let three = fs.readFileSync(path.join(dir, 'vendor/three.min.js'), 'utf8');
-three = three.replace(/^console\.warn\('[^']*'\),/, '');
+three = three.replace(/^console\.warn\('[^']*'\),/, 'void 0,');
 
 const srcDir = path.join(dir, 'src');
-const files = fs.readdirSync(srcDir).filter((f) => f.endsWith('.js')).sort();
+// 開発用: STATION=wrap|fry|eat を付けると、その場面のファイルだけを入れる（並行作業中の他の場面を除く）
+const only = process.env.STATION;
+const files = fs.readdirSync(srcDir).filter((f) => f.endsWith('.js'))
+  .filter((f) => !only || !/^[4-6]\d-/.test(f) || f.includes('-' + only + '.'))
+  .sort();
 const scripts = files
   .map((f) => `<script>/* ${f} */\n${esc(fs.readFileSync(path.join(srcDir, f), 'utf8'))}\n</script>`)
   .join('\n');
