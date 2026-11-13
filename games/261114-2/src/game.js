@@ -85,8 +85,10 @@ const Game = (() => {
   function buildFitPts() {
     const p = L.play, b = L.basket, t = L.trash, m = L.jarMount;
     fitPts.push(new V3(-p.hwFar, 0, p.zFar), new V3(p.hwFar, 0, p.zFar), new V3(-p.hwNear, 0, p.zNear), new V3(p.hwNear, 0, p.zNear));
+    // かご・ごみ箱は「だいたい見えていればよい」（外側の端は少し切れてよい。床を大きく見せるほうを優先）
     for (const o of [b, t]) {
-      fitPts.push(new V3(o.x - o.r, o.h, o.z), new V3(o.x + o.r, o.h, o.z), new V3(o.x, o.h, o.z - o.r), new V3(o.x, 0, o.z + o.r));
+      const sgn = o.x < 0 ? -1 : 1;
+      fitPts.push(new V3(o.x + sgn * o.r * 0.3, o.h, o.z), new V3(o.x, 0, o.z + o.r));
     }
     fitPts.push(new V3(m.x, m.y, m.z), new V3(m.x - L.jar.r, m.y, m.z), new V3(m.x + L.jar.r, m.y, m.z));
   }
@@ -94,7 +96,7 @@ const Game = (() => {
     for (let i = 0; i < fitPts.length; i++) {
       tv3.copy(fitPts[i]).project(cam);
       if (tv3.z > 1) return false;
-      if (tv3.x < -1 + 0.06 || tv3.x > 1 - 0.06 || tv3.y > 1 - 0.08 || tv3.y < -1 + 0.04) return false;
+      if (tv3.x < -1 + 0.03 || tv3.x > 1 - 0.03 || tv3.y > 1 - 0.06 || tv3.y < -1 + 0.04) return false;
     }
     return true;
   }
@@ -223,7 +225,8 @@ const Game = (() => {
   const rGlow = (name, a) => { if (chg('r' + name, a)) Room.setGlow(name, a); };
   const twinkle = a => { if (chg('tw', a)) Debris.setTwinkle(a); };
   const glint = (i, a) => { if (chg('k' + i, a)) Room.kusu[i].setGlint(a); };
-  const setTime = t => { if (chg('time', t)) Room.setTime(t); };
+  // 夕方は全体の露出も少し下げる（そうじき等、部屋以外の物も一緒に暗くなるように）
+  const setTime = t => { if (chg('time', t)) { Room.setTime(t); if (renderer) renderer.toneMappingExposure = 1 - 0.24 * Base.smooth(t); } };
   function glowsOff() {
     vGlow('head', 0); vGlow('cradle', 0); vGlow('power', 0);
     jGlow('handle', 0); jGlow('button', 0);
@@ -248,47 +251,46 @@ const Game = (() => {
   const demo = { on: false, kind: 'drag', t: 0, n: 0, pts: [new V3(), new V3(), new V3(), new V3()], len: [0, 0, 0, 0], total: 0 };
   function makeFinger() {
     const tex = Base.canvasTex(128, 256, (g, w, h) => {
-      const off = 2000, fw = 84, x0 = (w - fw) / 2, top = 12, r = fw / 2;
-      const capsule = (dx) => {
+      // はっきりした肌色の指先（上が指先）。ふちはやわらかく、根元へ向かって消える
+      const fw = 80, x0 = (w - fw) / 2, top = 14, r = fw / 2;
+      const capsule = () => {
         g.beginPath();
-        g.moveTo(x0 + dx, top + r);
-        g.arc(x0 + r + dx, top + r, r, Math.PI, 0);
-        g.lineTo(x0 + fw + dx, h + 40);
-        g.lineTo(x0 + dx, h + 40);
+        g.moveTo(x0, top + r);
+        g.arc(x0 + r, top + r, r, Math.PI, 0);
+        g.lineTo(x0 + fw, h + 40);
+        g.lineTo(x0, h + 40);
         g.closePath();
       };
-      // ぼかした輪郭（影だけをキャンバスに落とす）
       g.save();
-      g.shadowColor = 'rgba(250,224,206,1)'; g.shadowBlur = 8; g.shadowOffsetX = off;
-      g.fillStyle = '#000'; capsule(-off); g.fill();
+      g.shadowColor = 'rgba(120,70,50,0.55)'; g.shadowBlur = 9;
+      const sk = g.createLinearGradient(x0, 0, x0 + fw, 0);
+      sk.addColorStop(0, '#dfa184'); sk.addColorStop(0.3, '#f7cfb6'); sk.addColorStop(0.62, '#fbdcc6'); sk.addColorStop(1, '#d99a7e');
+      g.fillStyle = sk; capsule(); g.fill();
       g.restore();
-      // 丸みの陰影
+      // 爪
       g.save();
-      g.globalCompositeOperation = 'source-atop';
-      const gr = g.createLinearGradient(x0, 0, x0 + fw, 0);
-      gr.addColorStop(0, 'rgba(196,140,120,0.45)');
-      gr.addColorStop(0.35, 'rgba(255,255,255,0.10)');
-      gr.addColorStop(0.62, 'rgba(255,255,255,0.30)');
-      gr.addColorStop(1, 'rgba(196,140,120,0.45)');
-      g.fillStyle = gr; g.fillRect(0, 0, w, h);
-      // 爪（うっすら）
-      g.shadowColor = 'rgba(255,246,244,0.85)'; g.shadowBlur = 5; g.shadowOffsetX = off;
-      g.fillStyle = '#000';
-      g.beginPath(); g.ellipse(w / 2 - off, top + 34, 23, 27, 0, 0, Math.PI * 2); g.fill();
-      g.shadowColor = 'rgba(236,180,170,0.35)'; g.shadowBlur = 4;
-      g.beginPath(); g.ellipse(w / 2 - off, top + 58, 22, 5, 0, 0, Math.PI * 2); g.fill();
+      const ng = g.createLinearGradient(0, top + 6, 0, top + 62);
+      ng.addColorStop(0, '#fdeee8'); ng.addColorStop(1, '#f3c3b6');
+      g.fillStyle = ng;
+      g.beginPath(); g.ellipse(w / 2, top + 36, 22, 27, 0, 0, Math.PI * 2); g.fill();
+      g.strokeStyle = 'rgba(190,120,100,0.45)'; g.lineWidth = 2; g.stroke();
+      g.fillStyle = 'rgba(255,255,255,0.55)';
+      g.beginPath(); g.ellipse(w / 2 - 7, top + 26, 6, 10, -0.3, 0, Math.PI * 2); g.fill();
+      // 関節のしわ（うっすら）
+      g.strokeStyle = 'rgba(180,110,90,0.35)'; g.lineWidth = 2.5;
+      g.beginPath(); g.moveTo(x0 + 14, top + 112); g.quadraticCurveTo(w / 2, top + 104, x0 + fw - 14, top + 112); g.stroke();
       g.restore();
       // 根元に向かって消える
       g.save();
       g.globalCompositeOperation = 'destination-in';
       const fg = g.createLinearGradient(0, 0, 0, h);
-      fg.addColorStop(0, 'rgba(0,0,0,1)'); fg.addColorStop(0.5, 'rgba(0,0,0,0.95)'); fg.addColorStop(1, 'rgba(0,0,0,0)');
+      fg.addColorStop(0, 'rgba(0,0,0,1)'); fg.addColorStop(0.55, 'rgba(0,0,0,1)'); fg.addColorStop(1, 'rgba(0,0,0,0)');
       g.fillStyle = fg; g.fillRect(0, 0, w, h);
       g.restore();
     });
     const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false, depthWrite: false, opacity: 0, toneMapped: false });
     finger = new THREE.Sprite(mat);
-    finger.center.set(0.5, 1 - 13 / 256); // 指先がスプライトの上端
+    finger.center.set(0.5, 1 - 15 / 256); // 指先がスプライトの上端
     finger.renderOrder = 1000;
     finger.frustumCulled = false;
     finger.visible = false;
@@ -352,7 +354,7 @@ const Game = (() => {
   }
   function updateDemo(dt) {
     if (!demo.on || !finger) return;
-    const cycle = demo.kind === 'drag' ? 2.8 : 2.5;
+    const cycle = demo.kind === 'drag' ? 3.2 : 2.5;
     demo.t += dt;
     if (demo.t >= cycle) { demo.t -= cycle; fillDemo(); if (!demo.on) return; }
     const t = demo.t;
@@ -360,8 +362,8 @@ const Game = (() => {
     if (demo.kind === 'drag') {
       if (t < 0.25) { a = smooth(t / 0.25); demoPoint(0, tv2); }
       else if (t < 0.4) { a = 1; s = 1 - 0.1 * smooth((t - 0.25) / 0.15); demoPoint(0, tv2); }
-      else if (t < 1.35) { a = 1; s = 0.9; demoPoint(ease((t - 0.4) / 0.95), tv2); }
-      else if (t < 1.6) { const k = (t - 1.35) / 0.25; a = 1 - smooth(k); s = 0.9 + 0.1 * k; demoPoint(1, tv2); }
+      else if (t < 1.75) { a = 1; s = 0.9; demoPoint(ease((t - 0.4) / 1.35), tv2); }
+      else if (t < 2.0) { const k = (t - 1.75) / 0.25; a = 1 - smooth(k); s = 0.9 + 0.1 * k; demoPoint(1, tv2); }
       else { a = 0; demoPoint(1, tv2); }
     } else {
       tv2.copy(demo.pts[0]);
@@ -380,9 +382,9 @@ const Game = (() => {
     camera.getWorldDirection(fwd);
     const depth = Math.max(0.05, tv3.copy(tv2).sub(camera.position).dot(fwd));
     const perPx = 2 * depth * Math.tan(camera.fov * Math.PI / 360) / H;
-    const w = 0.15 * mn() * perPx * s;
+    const w = 0.2 * mn() * perPx * s;
     finger.scale.set(w, w * 2, 1);
-    finger.material.opacity = 0.6 * a;
+    finger.material.opacity = 0.72 * a;
   }
 
   // ---- くつしたの居場所（Debris に取得 API が無いので、イベントから推定）----
@@ -663,7 +665,7 @@ const Game = (() => {
           Jar.setHatch(false); Sfx.hatch(false);
           Jar.clear();
           jGlow('button', 0);
-          if (!jarMounted) jarTween(0.40, L.jar.h / 2 + 0.005, -0.50, qId, 0.5, false);
+          if (!jarMounted) jarTween(0.22, L.jar.h / 2 + 0.005, 0.12, qId, 0.6, false);
           setView('play', 0.9);
         }
         if (at(0.4)) { Room.trash.setLid(0); lidOpen = false; Sfx.lid(false); rGlow('trash', 0); }

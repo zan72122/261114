@@ -8,7 +8,7 @@ const Debris = (() => {
   const K_PC = 0, K_PS = 1, K_STAR = 2, K_BEAD = 3, K_POM = 4, NK = 5;
   const TYPE = ['paper', 'paper', 'star', 'bead', 'pom'];
   const BEAD_R = 0.0125, POM_R = 0.025;
-  const BLOB = [0.036, 0.036, 0.04, 0.036, 0.074];
+  const BLOB = [0.046, 0.046, 0.044, 0.036, 0.074];
   const RIB_HW = 0.006;
 
   // 色（本物の色紙・ホイル・樹脂・毛糸の色。彩度は控えめ）
@@ -260,8 +260,8 @@ const Debris = (() => {
       color: 0xffffff, roughness: 1, metalness: 0, sheen: 1, sheenRoughness: 0.55, sheenColor: new THREE.Color(0xd8d8d8),
       normalMap: low ? null : pomNormalTex(), normalScale: new THREE.Vector2(1.3, 1.3),
     });
-    const circ = curl(new THREE.CircleGeometry(0.019, 18).rotateX(-Math.PI / 2), 6.5, 0.8);
-    const sqr = curl(new THREE.PlaneGeometry(0.036, 0.036, 4, 4).rotateX(-Math.PI / 2), 5.5, 0.6);
+    const circ = curl(new THREE.CircleGeometry(0.025, 18).rotateX(-Math.PI / 2), 6.5, 0.8);
+    const sqr = curl(new THREE.PlaneGeometry(0.047, 0.047, 4, 4).rotateX(-Math.PI / 2), 5.5, 0.6);
     const geos = [circ, sqr, starGeo(), new THREE.SphereGeometry(BEAD_R, 14, 10), pomGeo()];
     const mats = [paperMat, paperMat, starMat, beadMat, pomMat];
     for (let k = 0; k < NK; k++) {

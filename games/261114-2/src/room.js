@@ -459,7 +459,7 @@ const Room = (() => {
     ctx.globalCompositeOperation = 'destination-out'; ctx.fillStyle = '#000'; ctx.fill();
     ctx.globalCompositeOperation = 'source-over';
     const t = -dz / len; // + = 奥へ押す
-    ctx.fillStyle = t >= 0 ? `rgba(255,253,248,${(0.06 + 0.06 * t).toFixed(3)})` : `rgba(96,86,74,${(0.05 + 0.06 * -t).toFixed(3)})`;
+    ctx.fillStyle = t >= 0 ? `rgba(255,253,248,${(0.04 + 0.035 * t).toFixed(3)})` : `rgba(96,86,74,${(0.03 + 0.035 * -t).toFixed(3)})`;
     ctx.fill();
     trackTex.needsUpdate = true;
   }
@@ -495,8 +495,8 @@ const Room = (() => {
     legM.castShadow = true; scene.add(legM);
     // クッション（頂点色）
     const cush = merge([
-      [pillow(0.44, 0.44, 0.15), mtx(x - 0.55, 0.62, zb + backD + 0.2, -0.32, 0.18, 0.05), 0xc7a55f],
-      [pillow(0.42, 0.42, 0.14), mtx(x + 0.52, 0.61, zb + backD + 0.2, -0.3, -0.22, -0.06), 0xe4ddd0],
+      [pillow(0.44, 0.44, 0.15), mtx(x - 0.55, 0.62, zb + backD + 0.2, -0.32, 0.18, 0.05), 0x3f6175],
+      [pillow(0.42, 0.42, 0.14), mtx(x + 0.52, 0.61, zb + backD + 0.2, -0.3, -0.22, -0.06), 0x7f957f],
       [pillow(0.36, 0.34, 0.12), mtx(x + 0.18, 0.58, zb + backD + 0.24, -0.34, -0.05, 0.04), 0xb27a62],
     ]);
     const cm = std({ vertexColors: true, map: TX.fabric, bumpMap: TX.fabric, bumpScale: 1.0, roughness: 0.9 });
