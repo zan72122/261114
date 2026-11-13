@@ -50,7 +50,9 @@ const MACHINE_POS = new V3(0.55, 0, -1.2);
 const N = new V3(-0.70, 0.70, -1.10);   // needle pierce point (world)
 const G0 = new V3(0, 0, -0.4);          // work spot grip (room)
 const PG0 = new V3(0, 0, -1.2);         // work spot grip (park)
-const STITCH = 0.045;
+const STITCH = 0.06;
+const THREAD_FOR = [1, 0, 5, 1];
+const GAGBTN_FOR = [1, 0, 5, 2];           // 布地ごとの最初のボタン色（布と同化しない色）           // 布地ごとの初期糸色（布と同化しない色）: gingham→青, dots→赤, flower→緑, berry→青
 const FEED_END = 0.985 * H;
 const APPLE_Y = 0.33;                   // apple centre height when resting on the table
 const LIFT_H = 0.5;                     // how high a dragged prop floats
@@ -72,7 +74,7 @@ const VIEWS = {
   start: { box: [-2.7, 0, -2.4, 2.7, 1, 6.1], pitch: 0.95 },
   table: { box: [-2.9, 0, -2.6, 2.9, 1.6, 4.6], pitch: 0.85 },
   lift: { box: [-2.3, 0, -1.2, 2.3, 4.9, 3.4], pitch: 0.62 },
-  sew: { box: [N.x - 2.0, 0.5, N.z - 0.7, N.x + 0.85, 1.5, N.z + 2.3], pitch: 0.72 },
+  sew: { box: [N.x - 1.0, 0.6, N.z - 1.15, N.x + 0.25, 1.0, N.z + 1.25], yaw: -0.7, pitch: 0.58 },
   home: { box: [-1.6, 0, -4.4, 4.9, 8.4, 2.5], pitch: 0.28 },
   park: { box: [-2.7, 0, -2.4, 2.7, 1.2, 3.4], pitch: 0.85 },
   parkLift: { box: [-2.4, 0, -2.4, 2.4, 4.9, 2.8], pitch: 0.62 },
@@ -80,7 +82,7 @@ const VIEWS = {
 
 // ------------------------------------------------------------------ persisted state
 const SAVE_V = 1;
-function defaults() { return { v: SAVE_V, round: 0, stage: 'fold', thread: 0, st: [], btns: [], packed: 0, extra: 0, bags: [] }; }
+function defaults() { return { v: SAVE_V, round: 0, stage: 'fold', thread: 1, st: [], btns: [], packed: 0, extra: 0, bags: [] }; }
 const fin = (v) => typeof v === 'number' && isFinite(v);
 function cleanSt(a) {
   const out = [];
@@ -177,6 +179,7 @@ export function startGame() {
 
   // ---- state
   let S = sanitize(engine.store.load());
+  const gagBtnIdx = () => GAGBTN_FOR[S.round % FABRICS.length] ?? 1;
   if (__DEV__) {
     const m = /stage=(\w+)/.exec(location.hash || '');
     if (m && STAGES.includes(m[1])) S.stage = m[1];
@@ -499,7 +502,7 @@ export function startGame() {
     const k = S.extra++;
     save();
     tinRattle();
-    const ent = mkButton((S.round + 1 + k) % 6);
+    const ent = mkButton((gagBtnIdx() + 1 + k) % 6);
     loose.push(ent);
     const sp = LAY.tinSpots[k % LAY.tinSpots.length];
     hopButtonOut(ent, new V3(sp[0], 0.03 * BTN_S, sp[1]));
@@ -563,6 +566,7 @@ export function startGame() {
   TYPES.fold = {
     cue: {
       glow: () => cloth.group,
+      halo: () => { cloth.nearEnd(hA); hA.y = 0.02; haloRet[1] = 1.25; return haloRet; },
       finger: () => { cloth.nearEnd(fA); fA.y += 0.12; fB.set(0, 0.15, 0.9); return fArr; },
       fingerOpt: { duration: 1.5, pause: 0.8 },
     },
@@ -727,7 +731,7 @@ export function startGame() {
     audio.play('knock');
     tinRattle0();
     // one button hops out of the tin
-    if (!gagBtn) gagBtn = mkButton(S.round % 6);
+    if (!gagBtn) gagBtn = mkButton(gagBtnIdx());
     hopButtonOut(gagBtn, new V3(LAY.gagBtn[0], 0.03 * BTN_S, LAY.gagBtn[1]));
     const rest = new V3(LAY.rest2[0], APPLE_Y, LAY.rest2[1]);
     if (!await rollPath(ent, c, new V3(lerp(c.x, rest.x, 0.5), APPLE_Y, lerp(c.z, rest.z, 0.5) + 0.03), rest, 0.6, 0.4)) return false;
@@ -958,7 +962,7 @@ export function startGame() {
   TYPES.sew = {
     cue: {
       glow: () => cloth.group, glowStrength: 0.45,
-      halo2: () => { hB.set(N.x, N.y + 0.035, N.z + 0.32); halo2Ret[1] = 0.3; return halo2Ret; },
+      halo2: () => { hB.set(N.x, N.y + 0.035, N.z + 0.32); halo2Ret[1] = 0.2; return halo2Ret; },
       finger: () => { fA.set(N.x - 0.2, N.y + 0.05, N.z + 1.45); fB.set(N.x - 0.08, N.y + 0.05, N.z + 0.32); return fArr; },
       fingerOpt: { duration: 1.1, pause: 0.6 },
     },
@@ -1163,7 +1167,7 @@ export function startGame() {
         let dur = audio.music('ending');
         if (!(dur > 0)) dur = 17;
         tw(8, (k) => world.setEvening(k), 'inOut');
-        engine.frame({ box: [-4.4, 0, -3.8, 4.4, 1.8, 4.6], pitch: 0.78, duration: 13, ease: 'inOut' });
+        engine.frame({ box: [-3.3, 0, -2.6, 3.3, 3.4, 3.3], pitch: 0.3, duration: 13, ease: 'inOut' });
         if (!await wt(dur + 2)) return;
         if (!await fadeTo(1, 1.4)) return;
         finishRound();
@@ -1222,6 +1226,7 @@ export function startGame() {
     S.bags.push({ f: S.round % FABRICS.length, st: S.st.slice(), b: S.btns.slice() });
     while (S.bags.length > 3) S.bags.shift();
     S.round++; S.st = []; S.btns = []; S.packed = 0; S.extra = 0;
+    S.thread = THREAD_FOR[S.round % FABRICS.length] ?? 1;
     applyStage('home', { arrive: true, teleport: true, fadeIn: 1.2, pegs: true });
   }
 
@@ -1311,7 +1316,7 @@ export function startGame() {
     for (const b of loose) dropObj(b.obj);
     loose.length = 0;
     if (i > SI.lift2 && i <= SI.button) {
-      if (!gagBtn) gagBtn = mkButton(S.round % 6);
+      if (!gagBtn) gagBtn = mkButton(gagBtnIdx());
       placeEnt(gagBtn, LAY.gagBtn[0], LAY.gagBtn[1], 0.4);
       gagBtn.obj.position.y = 0.03 * BTN_S; gagBtn.rest.y = 0.03 * BTN_S;
     } else if (gagBtn) { dropObj(gagBtn.obj); gagBtn = null; }

@@ -99,7 +99,7 @@ export function createCloth(fabricId) {
   const handleMeshes = handles.map((hd) => { const m = new THREE.Mesh(hd.g, matStrap); m.castShadow = true; m.receiveShadow = true; m.frustumCulled = false; group.add(m); return m; });
 
   // ---------- stitches ----------
-  if (!stitchGeo) { stitchGeo = new THREE.CapsuleGeometry(0.0062, 0.038, 2, 6); stitchGeo.rotateZ(Math.PI / 2); }
+  if (!stitchGeo) { stitchGeo = new THREE.CapsuleGeometry(0.011, 0.038, 2, 6); stitchGeo.rotateZ(Math.PI / 2); }
   const matStitch = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.38, metalness: 0.0 });
   const stitchMesh = new THREE.InstancedMesh(stitchGeo, matStitch, MAX_ST);
   stitchMesh.count = 0; stitchMesh.frustumCulled = false; stitchMesh.castShadow = false;
@@ -578,8 +578,8 @@ export function createCloth(fabricId) {
       const dist = _dir.length();
       _dir.addScaledVector(_sn, -_dir.dot(_sn)); if (_dir.lengthSq() < 1e-10) _dir.set(0, -1, 0); _dir.normalize();
       _zA.crossVectors(_dir, _sn).normalize();
-      const len = prevBySide[st.side] ? clamp(dist * 0.85, 0.03, 0.056) : 0.045;
-      _mat.makeBasis(_dir.multiplyScalar(len / 0.0504), _sn, _zA);
+      const len = prevBySide[st.side] ? clamp(dist * 0.85, 0.03, 0.075) : 0.055;
+      _mat.makeBasis(_dir.multiplyScalar(len / 0.06), _sn, _zA);
       _mat.setPosition(_sp.x + _sn.x * 0.0032, _sp.y + _sn.y * 0.0032, _sp.z + _sn.z * 0.0032);
       stitchMesh.setMatrixAt(i, _mat);
       prevBySide[st.side] = st; prevPos[st.side].copy(_sp);
