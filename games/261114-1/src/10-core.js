@@ -33,7 +33,7 @@
   var prLevels = [1], prLevel = 0, frameEma = 16.7, slowT = 0, fastT = 0, graceT = 1.5;
   // 画素の予算: iPad など大きな画面で devicePixelRatio をそのまま使うと塗りが重すぎるため、
   // 最初は「幅×高さ×pr² ≦ PX_BUDGET」になる段から始め、余裕が続けば上げる。
-  var PX_BUDGET = 2.6e6, prCeil = 0, upAt = -1e9, nowT = 0;
+  var PX_BUDGET = 2.8e6, prCeil = 0, upAt = -1e9, nowT = 0;
 
   C.init = function (canvas) {
     try {
@@ -74,9 +74,9 @@
 
       resize(true);
       G.input._bind();
-      window.addEventListener('resize', function () { resize(false); });
-      window.addEventListener('orientationchange', function () { setTimeout(function () { resize(false); }, 120); setTimeout(function () { resize(false); }, 500); });
-      if (window.visualViewport) window.visualViewport.addEventListener('resize', function () { resize(false); });
+      window.addEventListener('resize', function () { resize(false, true); });
+      window.addEventListener('orientationchange', function () { setTimeout(function () { resize(false, true); }, 120); setTimeout(function () { resize(false, true); }, 500); });
+      if (window.visualViewport) window.visualViewport.addEventListener('resize', function () { resize(false, true); });
       document.addEventListener('visibilitychange', onVis);
       window.addEventListener('pagehide', function () { G.input && G.input._cancelActive(); });
       window.addEventListener('blur', function () { G.input && G.input._cancelActive(); });
@@ -110,9 +110,15 @@
     C.renderer.setPixelRatio(pr);
     C.renderer.setSize(C.size.w, C.size.h, false);
   }
-  function resize(force) {
+  var safeCheckN = 0;
+  function resize(force, checkSafe) {
     if (!C.renderer) return;
-    var v = viewSize(), s = readSafe();
+    var v = viewSize();
+    // safe-area の読み取り（getComputedStyle）は重いので、大きさが変わった時と約0.5秒ごとだけ
+    var sizeSame = v.w === C.size.w && v.h === C.size.h;
+    if (!force && !checkSafe && sizeSame && ++safeCheckN < 30) return;
+    safeCheckN = 0;
+    var s = readSafe();
     var changed = force || v.w !== C.size.w || v.h !== C.size.h ||
       s.t !== C.safe.t || s.r !== C.safe.r || s.b !== C.safe.b || s.l !== C.safe.l;
     if (!changed) return;
